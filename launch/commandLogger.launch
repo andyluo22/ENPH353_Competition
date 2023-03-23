@@ -1,0 +1,8 @@
+<launch>
+    <!-- Controller Launch File-->
+    <node pkg ="controller_pkg"
+        type ="commandLogger.py"
+        name = "commandLogger"
+        output = "screen">
+    </node>
+</launch>

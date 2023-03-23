@@ -1,0 +1,8 @@
+<launch>
+    <!-- Controller Launch File-->
+    <node pkg ="controller_pkg"
+        type ="predictImages.py"
+        name = "predictImages"
+        output = "screen">
+    </node>
+</launch>
