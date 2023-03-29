@@ -11,6 +11,11 @@ import sys
 import tensorflow as tf
 import time
 
+from tensorflow.keras.utils import plot_model
+from tensorflow.keras import backend
+
+from cnn_trainer import CNNTrainer
+
 CAM_IMAGE_HEIGHT = 720
 CAM_IMAGE_WIDTH = 1280
 TIME_STEP = 0.040
@@ -20,7 +25,10 @@ LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good g
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
 
-
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
+model = tf.keras.models.load_model(model_path)
+model_path_left = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodieLeft.h5'
+modelLeft = tf.keras.models.load_model(model_path_left)
 
 class Controller:
     def __init__(self):
@@ -28,105 +36,80 @@ class Controller:
         self.image_sub = rospy.Subscriber(
             '/R1/pi_camera/image_raw', Image, self.image_callback)
         self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
-        self.pid = PID(2.6, 0.25,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
-        self.pidLeft = PID(3, 0.24, LEFT_MOST_X_COORDINATE)
         self.start_timer = 0
         self.count_license_plates = 0
+        # self.cnn_trainer = CNNTrainer((3,224,224) , 2)
+        # self.model = tf.keras.models.load_model(model_path, custom_objects={'bc_loss': self.cnn_trainer.build_model}) # Load the saved model
+        # self.model = tf.keras.models.load_model(model_path)
         self.countTerrain = 0
+        # self.model = tf.keras.models.load_model(model_path)
+        self.start_timer = time.time()
+        self.is_turning = False
+
 
 
     def image_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            cv_imageResize = cv2.resize(cv_image, (224, 224)) # resize the image to 224x224
-            im_gray = cv2.cvtColor(cv_imageResize, cv2.COLOR_BGR2GRAY)
-            _, binary_image = cv2.threshold(im_gray, 160, 255, cv2.THRESH_BINARY)
-            img = binary_image[130:224, :] # crop top half of the image\
-            img = img.reshape(img.shape + (1,))
-            img = img.astype(np.float32) / 255.0  # scale pixel values to be between 0 and 1
-            
-            # plt.show()
+            hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+            img = cv_image[400:720, 640: 1280]
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+
+            cv2.imshow("Image", img)
+            cv2.waitKey(1)
+            # # plt.show()
         except CvBridgeError as e:
             print(e)
 
-        cv2.imshow("binary cropped",img)
-        cv2.waitKey(1)
+        try:
+            # Pass the image through the model
+            # angular_vel = float(self.telemetry(cv_image))
+            angular_vel = float(self.telemetryLeft(cv_image, modelLeft))
+        except Exception as e:
+            print("Error predicting: ", str(e))
+        
+        linear_vel = 0.00
 
-        print(img.shape)
+        twist = Twist()
+        twist.linear.x = linear_vel
+        twist.angular.z = angular_vel * 2.7
+        self.cmd_pub.publish(twist)
 
+        self.start_timer += TIME_STEP
+        print(self.start_timer)
 
-
-
-
-    def region(self,image):
-        height, width = image.shape
-
-        polygon = np.array([[(int(width), height), (int(width),  
-        int(height*0.90)), (int(width*0.00), int(height*0.90)), (int(0), height),]], np.int32)    
-
-        mask = np.zeros_like(image)
+    def preProcessing(self,img):
+        img = img[400:720, 640: 1280]
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+        img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.resize(img, (200,66))
+        img = img / 255
+        return img
     
-        mask = cv2.fillPoly(mask, polygon, 255)
-        mask = cv2.bitwise_and(image, mask)
-
-        return mask
+    def telemetry(self,img):
+        image = np.asarray(img)
+        image = self.preProcessing(image)
+        image = np.array([image])
+        angular_z = float(model.predict(image))
+        print(angular_z)
+        return angular_z
     
-    def arrayOfPosition (self, width, x_coordinate, state):
-        newWidth = np.divide(width,10)
-
-        if(x_coordinate <= newWidth):
-            state[0] = 1
-        elif (x_coordinate <= newWidth * 2) :
-            state[1] = 1
-        elif (x_coordinate <= newWidth * 3) :
-            state[2] = 1
-        elif (x_coordinate <= newWidth * 4) :
-            state[3] = 1
-        elif (x_coordinate <= newWidth * 5) :
-            state[4] = 1
-        elif (x_coordinate <= newWidth * 6) :
-            state[5] = 1
-        elif (x_coordinate <= newWidth * 7) :
-            state[6] = 1
-        elif (x_coordinate <= newWidth * 8) :
-            state[7] = 1
-        elif (x_coordinate <= newWidth * 9) :
-            state[8] = 1
-        elif (x_coordinate <= newWidth * 10) :
-            state[9] = 1
-
-
-class PID:
-    ##Initialize/construct 
-    def __init__(self,KP,KD,target):
-        self.kp = KP
-        self.kd = KD
-        self.setpoint = target
-        self.error = 0
-        self.error_last = 0
-        self.derivative_error = 0.15
-        self.output = 0
-    def computeLeft(self, x_coordinate):
-        self.error = self.setpoint - x_coordinate
-        self.derivative_error = (self.error- self.error_last) / TIME_STEP
-        self.error_last = self.error
-        self.output = self.kp*self.error + self.kd*self.derivative_error
-        self.output_scaled = np.divide(self.output,PID_SCALE)
-        self.output_scaled = self.output_scaled
-        return self.output_scaled
-
-    def computeRight(self, x_coordinate):
-        self.error = self.setpoint - x_coordinate
-        self.derivative_error = (self.error- self.error_last) / TIME_STEP
-        self.error_last = self.error
-        self.output = self.kp*self.error + self.kd*self.derivative_error
-        self.output_scaled = np.divide(self.output,PID_SCALE)
-        self.output_scaled = self.output_scaled
-        return self.output_scaled
-
-
-
-
+    def preProcessingLeft(self,img):
+        img = img[400:720, 0:640]
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+        img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.resize(img, (200,66))
+        img = img / 255
+        return img
+    
+    def telemetryLeft(self,img, model):
+        image = np.asarray(img)
+        image = self.preProcessingLeft(image)
+        image = np.array([image])
+        angular_z = float(model.predict(image))
+        print(angular_z)
+        return angular_z
+    
 
 def main(args):
     rospy.init_node('Controller', anonymous=True)

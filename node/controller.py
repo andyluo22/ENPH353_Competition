@@ -1,4 +1,3 @@
-
 #! /usr/bin/env python3
 
 import rospy
@@ -26,8 +25,10 @@ LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good g
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
 
-model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelP4.h5'
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelBestNew2.h5'
+model_path2 = '/home/fizzer/ros_ws/src/controller_pkg/node/modelBestNew.h5'
 model = tf.keras.models.load_model(model_path)
+model2 = tf.keras.models.load_model(model_path2)
 
 class Controller:
     def __init__(self):
@@ -37,12 +38,9 @@ class Controller:
         self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
         self.start_timer = 0
         self.count_license_plates = 0
-        # self.cnn_trainer = CNNTrainer((3,224,224) , 2)
-        # self.model = tf.keras.models.load_model(model_path, custom_objects={'bc_loss': self.cnn_trainer.build_model}) # Load the saved model
-        # self.model = tf.keras.models.load_model(model_path)
         self.countTerrain = 0
-        # self.model = tf.keras.models.load_model(model_path)
-
+        self.mode = "stop_and_turn"
+        self.last_action_time = 0
 
     def image_callback(self, msg):
         try:
@@ -57,28 +55,84 @@ class Controller:
         except CvBridgeError as e:
             print(e)
 
-        try:
-            # Pass the image through the model
-            angular_vel = float(self.telemetry(cv_image))
-        except Exception as e:
-            print("Error predicting: ", str(e))
+        if self.countTerrain < 1.4:
+            linear_vel = 0.20
+            twist = Twist()
+            twist.linear.x = linear_vel 
+            twist.angular.z = 0.05
+            self.cmd_pub.publish(twist)
+        elif self.countTerrain >= 1.4 and self.countTerrain < 3.8:
+            if self.mode == "stop_and_turn":
+                if self.start_timer - self.last_action_time < 1.4:
+                    try:
+                        # Pass the image through the model
+                        angular_acc = float(self.telemetry(cv_image,model))
+                    except Exception as e:
+                        print("Error predicting: ", str(e))
+
+                    linear_vel = 0.00
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = angular_acc * 2
+                    self.cmd_pub.publish(twist)
+                else:
+                    # Switch to "go_straight" mode
+                    self.mode = "go_straight"
+                    self.last_action_time = self.start_timer
+            
+            elif self.mode == "go_straight":
+                if self.start_timer - self.last_action_time < 0.5:
+                    # Use PID control to generate Twist message with zero angular acceleration
+                    linear_vel = 0.20
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = 0.0
+                    self.cmd_pub.publish(twist)
+                else:
+                    # Switch to "stop_and_turn" mode
+                    self.mode = "stop_and_turn"
+                    self.last_action_time = self.start_timer
+            
+            self.start_timer += TIME_STEP
+            print(self.start_timer)
+        else:
+            if self.mode == "stop_and_turn":
+                if self.start_timer - self.last_action_time < 1.4:
+                    # Use PID control to generate Twist message with angular acceleration from the model
+                    try:
+                        # Pass the image through the model
+                        angular_acc = float(self.telemetry(cv_image, model2))
+                    except Exception as e:
+                        print("Error predicting: ", str(e))
+
+                    linear_vel = 0.00
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = angular_acc * 2
+                    self.cmd_pub.publish(twist)
+                else:
+                    # Switch to "go_straight" mode
+                    self.mode = "go_straight"
+                    self.last_action_time = self.start_timer
+            
+            elif self.mode == "go_straight":
+                if self.start_timer - self.last_action_time < 0.5:
+                    # Use PID control to generate Twist message with zero angular acceleration
+                    linear_vel = 0.20
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = 0.0
+                    self.cmd_pub.publish(twist)
+                else:
+                    # Switch to "stop_and_turn" mode
+                    self.mode = "stop_and_turn"
+                    self.last_action_time = self.start_timer
+            
+            self.start_timer += TIME_STEP
+            print(self.start_timer)
+        self.countTerrain += TIME_STEP
+
         
-        linear_vel = 0.00
-
-        # if angular_vel < 0.20 and a, : ,:gular_vel > 0:
-        #     linear_vel = 0.17
-        #     angular_vel = 0.01
-        # else:
-        #     linear_vel = 0.05
-        # # Use PID control to generate Twist message
-        # Use PID control to generate Twist message
-        twist = Twist()
-        twist.linear.x = linear_vel
-        twist.angular.z = angular_vel 
-        self.cmd_pub.publish(twist)
-
-        self.start_timer += TIME_STEP
-        print(self.start_timer)    
 
     def preProcessing(self,img):
         img = img[400:720, :, :]
@@ -88,14 +142,15 @@ class Controller:
         img = img / 255
         return img
     
-    def telemetry(self,img):
+    def telemetry(self,img, model):
         image = np.asarray(img)
         image = self.preProcessing(image)
         image = np.array([image])
         angular_z = float(model.predict(image))
         print(angular_z)
         return angular_z
-    
+
+
 
 def main(args):
     rospy.init_node('Controller', anonymous=True)
@@ -108,4 +163,5 @@ def main(args):
 
 
 if __name__ == '__main__':
+    main(sys.argv)
     main(sys.argv)
