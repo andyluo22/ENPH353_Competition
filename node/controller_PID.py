@@ -25,8 +25,11 @@ LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good g
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
 
-model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/model.h5'
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
 model = tf.keras.models.load_model(model_path)
+model_path_left = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodieLeft.h5'
+modelLeft = tf.keras.models.load_model(model_path_left)
+
 
 class Controller:
     def __init__(self):
@@ -34,16 +37,26 @@ class Controller:
         self.image_sub = rospy.Subscriber(
             '/R1/pi_camera/image_raw', Image, self.image_callback)
         self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
-        self.pid = PID(2.6, 0.25,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
+        self.pid = PID(2.6, 0.20,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
         self.pidLeft = PID(3, 0.24, LEFT_MOST_X_COORDINATE)
         self.start_timer = 0
         self.terrain_timer = 0
         self.count_license_plates = 0
-        # self.cnn_trainer = CNNTrainer((3,224,224) , 2)
-        # self.model = tf.keras.models.load_model(model_path, custom_objects={'bc_loss': self.cnn_trainer.build_model}) # Load the saved model
-        # self.model = tf.keras.models.load_model(model_path)
         self.countTerrain = 0
-        # self.model = tf.keras.models.load_model(model_path)
+
+        self.command_timer = time.time()
+        self.terrain_timer = 0
+        self.is_turning = False
+        self.time_terrain_tracker = 0
+        self.movement_detected = True
+        self.count_red_lines = 0
+        self.prev_frame = None  # to store the previous frame
+        self.frame_counter = 0  # to count the frames
+
+        self.moving_car_detected = False
+        self.car_frame_counter = 0
+        self.prev_car_frame = None
+
 
 
     def image_callback(self, msg):
@@ -51,107 +64,89 @@ class Controller:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
-
-            # plt.show()
         except CvBridgeError as e:
             print(e)
+        if(self.countTerrain < 1.000001):
+            state = np.zeros(10, dtype=np.int)
 
-        state = np.zeros(10, dtype=np.int)
+            copy = np.copy(cv_image)
 
-        copy = np.copy(cv_image)
+            # ----------------------------NON-HSV
+            gray = cv2.cvtColor(copy, cv2.COLOR_BGR2GRAY)
 
-        # ----------------------------NON-HSV
-        gray = cv2.cvtColor(copy, cv2.COLOR_BGR2GRAY)
+            blured_image = cv2.GaussianBlur(gray, (3,3), 0)
 
-        blured_image = cv2.GaussianBlur(gray, (3,3), 0)
+            edges = cv2.Canny(blured_image, 0, 50)
 
-        edges = cv2.Canny(blured_image, 0, 50)
+            isolated = self.region(edges)
 
-        # cv2.imshow("edges", edges)
-        # cv2.waitKey(1)
+            row_indexes, col_indexes = np.nonzero(isolated)
+            max_col = 0
+            min_col = 0
 
-        isolated = self.region(edges)
+            # Find find left side of edge and right side of edge
+            if len(col_indexes) > 0:
+                max_col = max(col_indexes)
+                min_col = min(col_indexes)
 
-        # cv2.imshow("isolated", isolated)
-        # cv2.waitKey(1)
+            # ----------------------------HSV
+            if self.count_red_lines == 3:
+                lower_green = np.array([10, 70, 100])
+                upper_green = np.array([35, 160, 200])
 
-        row_indexes, col_indexes = np.nonzero(isolated)
-        max_col = 0
-        min_col = 0
+                # Create mask for yellow-green grass
+                green_mask = cv2.inRange(hsv_image, lower_green, upper_green)
 
-        # Find find left side of edge and right side of edge
-        if len(col_indexes) > 0:
-            max_col = max(col_indexes)
-            min_col = min(col_indexes)
+                # Define color thresholds for white lanes in HSV
+                lower_white = np.array([130, 0, 200])
+                upper_white = np.array([255, 100, 255])
 
-        cv2.imshow("raw", cv_image)
-        cv2.waitKey(1)
+                # Create mask for white lanes
+                white_mask = cv2.inRange(hsv_image, lower_white, upper_white)
 
-        # ----------------------------HSV
+                # cv2.imshow("white" , white_mask)
+                # cv2.waitKey(1)
 
-        lower_green = np.array([10, 70, 100])
-        upper_green = np.array([35, 160, 200])
+                # Combine masks using bitwise_and()
+                mask = cv2.bitwise_or(green_mask, white_mask)
 
-        # Create mask for yellow-green grass
-        green_mask = cv2.inRange(hsv_image, lower_green, upper_green)
+                # Close any gaps in the mask
+                kernel = np.ones((5,5), np.uint8)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-        # Define color thresholds for white lanes in HSV
-        lower_white = np.array([130, 0, 200])
-        upper_white = np.array([255, 100, 255])
+                # Apply mask to original image
+                masked_img = cv2.bitwise_and(cv_image, cv_image, mask=mask)
 
-        # Create mask for white lanes
-        white_mask = cv2.inRange(hsv_image, lower_white, upper_white)
+                gray = cv2.cvtColor(masked_img, cv2.COLOR_BGR2GRAY)
 
-        # cv2.imshow("white" , white_mask)
-        # cv2.waitKey(1)
+                ##remove noise using gaussian blur 
+                blured_image = cv2.GaussianBlur(gray, (3,3), 0)
 
-        # Combine masks using bitwise_and()
-        mask = cv2.bitwise_or(green_mask, white_mask)
+                ##detect edges from luminosity change 
+                edges = cv2.Canny(blured_image, 100, 200)
 
-        # Close any gaps in the mask
-        kernel = np.ones((5,5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+                ##mask polygon onto black plane 
+                isolated = self.region(edges)
 
-        # cv2.imshow("raw", mask)
-        # cv2.waitKey(1)
+                # Detect lines using the Hough transform
+                lines = cv2.HoughLinesP(isolated, 1, np.pi/180, 50, minLineLength=20, maxLineGap=10)
 
-        # Apply mask to original image
-        masked_img = cv2.bitwise_and(cv_image, cv_image, mask=mask)
+                max_x = 0
 
-        gray = cv2.cvtColor(masked_img, cv2.COLOR_BGR2GRAY)
+                # HOUGH LINES
+                if(lines is not None):
+                    for line in lines:
+                        x1, y1, x2, y2 = line[0]
 
-        ##remove noise using gaussian blur 
-        blured_image = cv2.GaussianBlur(gray, (3,3), 0)
+                        start_x = min(x1,x2)
+                        end_x = max(x1,x2)
 
-        ##detect edges from luminosity change 
-        edges = cv2.Canny(blured_image, 100, 200)
+                        if end_x > max_x:
+                            max_x = end_x
 
-        ##mask polygon onto black plane 
-        isolated = self.region(edges)
-
-        # Detect lines using the Hough transform
-        lines = cv2.HoughLinesP(isolated, 1, np.pi/180, 50, minLineLength=20, maxLineGap=10)
-
-        max_x = 0
-
-        # HOUGH LINES
-        if(lines is not None):
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-
-                start_x = min(x1,x2)
-                end_x = max(x1,x2)
-
-                if end_x > max_x:
-                    max_x = end_x
-
-                cv2.line(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            
-            self.countTerrain = self.countTerrain + 1
-
-
-        cv2.imshow("raw", cv_image)
-        cv2.waitKey(1)
+                        cv2.line(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    
+                    self.countTerrain = self.countTerrain + 1
 
         # --------------------------------------- MOVEMENT CONTROL
         if self.start_timer < 5 and self.countTerrain == 0:
@@ -167,9 +162,79 @@ class Controller:
 
         elif self.countTerrain == 0: 
             twist = Twist() 
-            twist.linear.x = 0.27
+            twist.linear.x = 0.30
             twist.angular.z = self.pid.computeRight(max_col)
+
+            #Detect Red Line Process
+            img_red = cv_image[600:720, 300: 1100]
+             # Convert the image to HSV color space
+            hsv_img_red = cv2.cvtColor(img_red, cv2.COLOR_BGR2HSV)
+
+            # Define the range of red color in HSV color space
+            lower_red = np.array([0, 50, 50])
+            upper_red = np.array([10, 255, 255])
+
+            # Create a mask using the range of red color
+            mask1_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+            # Define the range of red color in HSV color space
+            lower_red = np.array([170, 50, 50])
+            upper_red = np.array([180, 255, 255])
+
+            # Create another mask using the range of red color
+            mask2_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+            # Combine the masks
+            mask_red = mask1_red + mask2_red
+
+            # Apply the mask to the original image
+            red_img = cv2.bitwise_and(img_red, img_red, mask=mask_red)
+
+            gray_red = cv2.cvtColor(red_img, cv2.COLOR_BGR2GRAY)
+
+            ##remove noise using gaussian blur 
+            blured_image_red = cv2.GaussianBlur(gray_red, (3,3), 0)
+
+            ##detect edges from luminosity change 
+            edges_red = cv2.Canny(blured_image_red, 100, 200)
+
+            red_line_points = np.count_nonzero(edges_red)
+
+            if red_line_points > 0 and self.count_red_lines % 2 == 0:
+                self.count_red_lines += 1
+
+            if self.start_timer > 14 and self.count_red_lines == 1:
+                self.count_red_lines += 1
+                self.movement_detected = True
+
+            if self.count_red_lines % 2 == 1 and self.movement_detected == True :
+                twist.linear.x = 0.0
+                self.cmd_pub.publish(twist)
+                img_ped = cv_image[250:500, 350:1000]
+
+                if self.frame_counter % 3 == 0:
+                    if self.prev_frame is not None:
+                        # subtract the current frame from the previous frame
+                        diff = cv2.absdiff(img_ped, self.prev_frame)
+                        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+                        _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
+                        
+                        # check for movement by counting the number of non-zero pixels
+                        if cv2.countNonZero(thresh) > 0:
+                            print("Movement detected.")
+                        else:
+                            self.movement_detected = False
+                            print("No movement detected.")
+                            
+                    # update the previous frame
+                    self.prev_frame = img_ped.copy()
+                
+                # increment the counter
+                self.frame_counter += 1
+            
             self.cmd_pub.publish(twist)
+            
 
             self.start_timer += TIME_STEP
             print(self.start_timer)
@@ -179,7 +244,7 @@ class Controller:
             twist.linear.x = 0.0
             twist.angular.z = 0.0
             self.cmd_pub.publish(twist)
-            self.countTerrain = self.countTerrain + 1
+            self.countTerrain = self.countTerrain + 0.0000000000001
             time.sleep(0.5)
 
             self.start_timer += TIME_STEP
@@ -190,64 +255,91 @@ class Controller:
         else:
             try:
                 # Pass the image through the model
-                angular_vel = float(self.telemetry(cv_image))
+                angular_vel = float(self.telemetry(cv_image, model))
             except Exception as e:
                 print("Error predicting: ", str(e))
-            
-            timeOnTerrain = self.start_timer-self.terrain_timer
-            if (timeOnTerrain) < 0.20:
-                linear_vel = 0.20
-                angular_vel = 0.05
-            elif timeOnTerrain >= 0.20 and timeOnTerrain < 2.3:
+
+            if self.time_terrain_tracker < 0.95:
+                linear_vel = 0.1925
+
+            elif self.time_terrain_tracker >= 0.95 and self.time_terrain_tracker < 3.2:
+                linear_vel = 0.07
+                angular_vel = angular_vel * 2.5
+
+            elif self.time_terrain_tracker >=3.2 and self.time_terrain_tracker < 19:
                 linear_vel = 0.08
-            elif timeOnTerrain >= 2.3 and timeOnTerrain < 3:
-                angular_vel = 0.40
-                linear_vel = 0.08 
-            elif timeOnTerrain >= 3 and timeOnTerrain < 5.5:
-                angular_vel = 0.01
-                linear_vel = 0.08
-            elif timeOnTerrain >= 5.5 and timeOnTerrain < 9.7:
-                linear_vel = 0.10
-            elif timeOnTerrain >= 9.7 and timeOnTerrain < 11.6: #USE PID but sc
-                linear_vel = 0.13
-                if max_x < 600:
-                    max_x = 1250
-                
-                angular_vel = self.pid.computeRight(max_x) / 9
-            else:
-                if max_x < 600:
-                    max_x = 1100
-                    linear_vel = 0.13
+
+                if not self.is_turning and time.time() - self.command_timer >= 1.0:
+                    self.is_turning = True
+                    angular_vel = 1.0 * angular_vel
+                    self.start_turn_time = time.time()
+
+                if self.is_turning and time.time() - self.command_timer <= 0.050:
+                    angular_vel = -0.010
                 else:
-                    angular_vel = self.pid.computeRight(max_x) / 1.7
-                    # linear_vel = 0.0
+                    self.is_turning = False
+            elif self.time_terrain_tracker >= 19 and self.time_terrain_tracker < 22:
+                linear_vel = 0.04
+                angular_vel = angular_vel * 2.4
+            
+            elif self.time_terrain_tracker >= 22 and self.time_terrain_tracker < 25.5:
+                linear_vel = 0.10
+                angular_vel = angular_vel 
+            
+            elif self.time_terrain_tracker >= 25.5 and self.time_terrain_tracker < 30.2:
+                linear_vel = 0.05
+                try:
+                    # Pass the image through the model
+                    angular_vel = float(self.telemetryLeft(cv_image, modelLeft)) * 2.4
+                except Exception as e:
+                    print("Error predicting: ", str(e))
 
-                    # time.sleep(0.3)
-                    linear_vel = 0.135
-                    # angular_vel = 0.0
-                    print("Angular_vel\n")
-                    print(angular_vel)
-                    print("\n" + "XCoord\n")
-                    print(max_x)
+            elif self.time_terrain_tracker >= 30.2 and self.moving_car_detected == False:
+                linear_vel = 0
+                angular_vel = 0
 
-            print("Time on Terrain\n")
-            print(timeOnTerrain)
+                try:
+                    cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+                    img_car = cv_image[450:720, 300: 700]
+                    cv2.imshow("image", img_car)
+                    cv2.waitKey(1)
+                    # # plt.show()
+                except CvBridgeError as e:
+                    print(e)
 
-            # if angular_vel < 0.24 and angular_vel > 0:
-            #     linear_vel = 0.17
-            #     angular_vel = 0.01
-            # else:
-            #     linear_vel = 0.05
-            # # Use PID control to generate Twist message
-            # Use PID control to generate Twist message
+                if self.car_frame_counter % 3 == 0:
+                    if self.prev_car_frame is not None:
+                        # subtract the current frame from the previous frame
+                        diff = cv2.absdiff(img_car, self.prev_car_frame)
+                        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+                        _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
+                        
+                        # check for movement by counting the number of non-zero pixels
+                        if cv2.countNonZero(thresh) > 0:
+                            self.moving_car_detected == True
+                            print("Movement detected.")
+                        else:
+                            self.movement_detected = False
+                            print("No movement detected.")
+                            
+                    # update the previous frame
+                    self.prev_car_frame = img_car.copy()
+                
+                # increment the counter
+                self.car_frame_counter += 1
+
+            
             twist = Twist()
             twist.linear.x = linear_vel
             twist.angular.z = angular_vel 
             self.cmd_pub.publish(twist)
-
-            self.start_timer += TIME_STEP
-            # print(self.start_timer)
+            self.time_terrain_tracker += TIME_STEP
+            print("Terrain Timer\n")
+            print(self.time_terrain_tracker)
+            print("\n")
         
+
 
     def region(self,image):
         height, width = image.shape
@@ -287,21 +379,37 @@ class Controller:
             state[9] = 1
 
     def preProcessing(self,img):
-        img = img[400:720, :, :]
+        img = img[400:720, 640:1280]
         img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
         img = cv2.GaussianBlur(img,(3,3),0)
         img = cv2.resize(img, (200,66))
         img = img / 255
         return img
     
-    def telemetry(self,img):
+    def telemetry(self,img, model):
         image = np.asarray(img)
         image = self.preProcessing(image)
         image = np.array([image])
         angular_z = float(model.predict(image))
         print(angular_z)
         return angular_z
-
+    
+    def preProcessingLeft(self,img):
+        img = img[400:720, 0:640]
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+        img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.resize(img, (200,66))
+        img = img / 255
+        return img
+    
+    def telemetryLeft(self,img, model):
+        image = np.asarray(img)
+        image = self.preProcessingLeft(image)
+        image = np.array([image])
+        angular_z = float(model.predict(image))
+        print(angular_z)
+        return angular_z
+    
 
 
 class PID:
@@ -331,19 +439,6 @@ class PID:
         self.output_scaled = np.divide(self.output,PID_SCALE)
         self.output_scaled = self.output_scaled
         return self.output_scaled
-
-def bc_loss(y_true, y_pred):
-    # Compute the difference between predicted and expert actions
-    error = y_pred - y_true
-
-    # Compute the mean squared error
-    mse = tf.reduce_mean(tf.square(error))
-
-    # Scale the error by the norm of the expert actions
-    norm = tf.norm(y_true)
-    scaled_error = mse / (norm + 1e-8)
-
-    return scaled_error
 
 def main(args):
     rospy.init_node('Controller', anonymous=True)
