@@ -1,0 +1,8 @@
+<launch>
+    <!-- Controller Launch File-->
+    <node pkg ="controller_pkg"
+        type ="controller_testHSV.py"
+        name = "controller_testHSV"
+        output = "screen">
+    </node>
+</launch>

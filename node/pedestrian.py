@@ -11,10 +11,6 @@ import sys
 import tensorflow as tf
 import time
 
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras import backend
-
-from cnn_trainer import CNNTrainer
 
 CAM_IMAGE_HEIGHT = 720
 CAM_IMAGE_WIDTH = 1280
@@ -41,10 +37,13 @@ class Controller:
         # self.model = tf.keras.models.load_model(model_path)
         self.countTerrain = 0
         # self.model = tf.keras.models.load_model(model_path)
-        self.start_timer = time.time()
+        self.start_timer = 0
         self.is_turning = False
         self.prev_frame = None  # to store the previous frame
         self.frame_counter = 0  # to count the frames
+
+        self.pid = PID(2.6, 0.20,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
+        self.pidLeft = PID(3, 0.24, LEFT_MOST_X_COORDINATE)
 
 
     # # Detecting the red line ----------- WORKS very well
@@ -99,8 +98,7 @@ class Controller:
     def image_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            img_ped = cv_image[250:500, 350:1000]
-
+            img_ped = cv_image[250:500, 550:750]
             cv2.imshow("Image", img_ped)
             cv2.waitKey(1)
 
@@ -108,25 +106,48 @@ class Controller:
         except CvBridgeError as e:
             print(e)
 
-        if self.frame_counter % 1 == 0:
-            if self.prev_frame is not None:
-                # subtract the current frame from the previous frame
-                diff = cv2.absdiff(img_ped, self.prev_frame)
-                gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-                blur = cv2.GaussianBlur(gray, (5, 5), 0)
-                _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
-                
-                # check for movement by counting the number of non-zero pixels
-                if cv2.countNonZero(thresh) > 0:
-                    print("Movement detected.")
-                else:
-                    print("No movement detected.")
-                    
-            # update the previous frame
-            self.prev_frame = img_ped.copy()
-        
-        # increment the counter
-        self.frame_counter += 1
+
+
+    def region(self,image):
+        height, width = image.shape
+
+        polygon = np.array([[(int(width), height), (int(width),  
+        int(height*0.90)), (int(width*0.00), int(height*0.90)), (int(0), height),]], np.int32)    
+
+        mask = np.zeros_like(image)
+
+        mask = cv2.fillPoly(mask, polygon, 255)
+        mask = cv2.bitwise_and(image, mask)
+
+        return mask
+    
+class PID:
+    ##Initialize/construct 
+    def __init__(self,KP,KD,target):
+        self.kp = KP
+        self.kd = KD
+        self.setpoint = target
+        self.error = 0
+        self.error_last = 0
+        self.derivative_error = 0.15
+        self.output = 0
+    def computeLeft(self, x_coordinate):
+        self.error = self.setpoint - x_coordinate
+        self.derivative_error = (self.error- self.error_last) / TIME_STEP
+        self.error_last = self.error
+        self.output = self.kp*self.error + self.kd*self.derivative_error
+        self.output_scaled = np.divide(self.output,PID_SCALE)
+        self.output_scaled = self.output_scaled
+        return self.output_scaled
+
+    def computeRight(self, x_coordinate):
+        self.error = self.setpoint - x_coordinate
+        self.derivative_error = (self.error- self.error_last) / TIME_STEP
+        self.error_last = self.error
+        self.output = self.kp*self.error + self.kd*self.derivative_error
+        self.output_scaled = np.divide(self.output,PID_SCALE)
+        self.output_scaled = self.output_scaled
+        return self.output_scaled
 
 def main(args):
     rospy.init_node('Pedestrian', anonymous=True)

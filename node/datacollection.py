@@ -46,14 +46,18 @@ class Controller:
         self.terrain_timer = 0
         self.is_turning = False
         self.time_terrain_tracker = 0
+
         self.movement_detected = True
         self.count_red_lines = 0
         self.prev_frame = None  # to store the previous frame
         self.frame_counter = 0  # to count the frames
+        self.speed_up = False
+        self.start_speedup_timer = 0
 
         self.moving_car_detected = False
         self.car_frame_counter = 0
         self.prev_car_frame = None
+    
 
         self.clock_sub = rospy.Subscriber('/clock',Clock, self.clock_callback)
         self.license_pub = rospy.Publisher('/license_plate',String,queue_size=10)
@@ -64,6 +68,8 @@ class Controller:
 
         self.off_terrain = False
 
+        self.countResult = 0
+
 
 
 
@@ -73,10 +79,37 @@ class Controller:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
+            height, width = hsv_image.shape[:2]
+            crop_image = cv_image[int(height*0.6):height, 0:width]
+            hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+            hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+            #define the lower and upper hsv values for the hsv colors
+            lower_hsv = np.uint8(np.array([100, 0, 80]))
+            upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+            # mask and extract the license plate
+            mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+            mask_bin = mask.astype(np.uint8) * 255
+
+            # Count the number of blue pixels in the ROI
+            pixel_count = cv2.countNonZero(mask_bin)
+            if(pixel_count>3300):
+                _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                x, y, w, h, _ = stats[largest_label]
+                result = crop_image[y:y+h, x:x+w]
+                self.image_filename = f"images/{self.countResult}.jpg"
+                self.countResult += 1
+                # cv2.imwrite(self.image_filename, cv_image)
+                # cv2.imshow("mask", result)
+                # cv2.waitKey(500)
+
         except CvBridgeError as e:
             print(e)
         if(self.countTerrain < 1.000001 or self.off_terrain == True):
-            state = np.zeros(10, dtype=np.int)
 
             copy = np.copy(cv_image)
 
@@ -88,6 +121,9 @@ class Controller:
             edges = cv2.Canny(blured_image, 0, 50)
 
             isolated = self.region(edges)
+
+            # cv2.imshow("edges",isolated)
+            # cv2.waitKey(1)
 
             row_indexes, col_indexes = np.nonzero(isolated)
             max_col = 0
@@ -158,12 +194,12 @@ class Controller:
                     self.countTerrain = self.countTerrain + 1
 
         # --------------------------------------- MOVEMENT CONTROL
-        if self.start_timer < 20 and self.countTerrain == 0:
+        if self.start_timer < 5 and self.countTerrain == 0:
             twist = Twist()
-            twist.linear.x = 0.23
+            twist.linear.x = 0.14
             if(min_col > 1000):
                 min_col = 50
-            twist.angular.z = self.pidLeft.computeLeft(min_col) * 1.5
+            twist.angular.z = self.pidLeft.computeLeft(min_col)
             self.cmd_pub.publish(twist)
 
             self.start_timer += TIME_STEP
@@ -215,6 +251,7 @@ class Controller:
             if self.start_timer > 14 and self.count_red_lines == 1:
                 self.count_red_lines += 1
                 self.movement_detected = True
+                self.no_movement_counter = 0
 
             if self.count_red_lines % 2 == 1 and self.movement_detected == True :
                 twist.linear.x = 0.0
@@ -232,7 +269,7 @@ class Controller:
                         # check for movement by counting the number of non-zero pixels
                         if cv2.countNonZero(thresh) > 0:
                             print("Movement detected.")
-                        else:
+                        else:   
                             self.movement_detected = False
                             print("No movement detected.")
                             
@@ -253,142 +290,7 @@ class Controller:
             twist.linear.x = 0.0
             twist.angular.z = 0.0
             self.cmd_pub.publish(twist)
-            self.countTerrain = self.countTerrain + 0.0000000000001
-            time.sleep(0.5)
 
-            self.start_timer += TIME_STEP
-            print(self.start_timer)
-            self.terrain_timer = self.start_timer
-           
-
-        else:
-            try:
-                # Pass the image through the model
-                angular_vel = float(self.telemetry(cv_image, model))
-            except Exception as e:
-                print("Error predicting: ", str(e))
-
-            if self.time_terrain_tracker < 0.95:
-                linear_vel = 0.1925
-
-            elif self.time_terrain_tracker >= 0.95 and self.time_terrain_tracker < 3.2:
-                linear_vel = 0.07
-                angular_vel = angular_vel * 2.6
-
-            elif self.time_terrain_tracker >=3.2 and self.time_terrain_tracker < 18.25:
-                linear_vel = 0.08
-
-                if not self.is_turning and time.time() - self.command_timer >= 1.0:
-                    self.is_turning = True
-                    angular_vel = 1.0 * angular_vel
-                    self.start_turn_time = time.time()
-
-                if self.is_turning and time.time() - self.command_timer <= 0.050:
-                    angular_vel = -0.010
-                else:
-                    self.is_turning = False
-            elif self.time_terrain_tracker >= 18.25 and self.time_terrain_tracker < 22:
-                linear_vel = 0.04
-                angular_vel = angular_vel * 2.4
-            
-            elif self.time_terrain_tracker >= 22 and self.time_terrain_tracker < 25.5:
-                linear_vel = 0.10
-                angular_vel = angular_vel 
-            
-            elif self.time_terrain_tracker >= 25.5 and self.time_terrain_tracker < 30.2:
-                linear_vel = 0.05
-                try:
-                    # Pass the image through the model
-                    angular_vel = float(self.telemetryLeft(cv_image, modelLeft)) * 2.4
-                except Exception as e:
-                    print("Error predicting: ", str(e))
-
-            elif self.time_terrain_tracker >= 30.2 and self.time_terrain_tracker < 31:
-                linear_vel = 0
-                angular_vel = 0
-
-            elif self.time_terrain_tracker >= 31 and self.moving_car_detected == False:
-                linear_vel = 0
-                angular_vel = 0
-                twist = Twist()
-                twist.linear.x = linear_vel
-                twist.angular.z = angular_vel 
-                self.cmd_pub.publish(twist)
-
-                try:
-                    cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-                    img_car = cv_image[450:720, 300: 700]
-                    cv2.imshow("image", img_car)
-                    cv2.waitKey(1)
-                    # # plt.show()
-                except CvBridgeError as e:
-                    print(e)
-
-                if self.car_frame_counter % 5 == 0:
-                    if self.prev_car_frame is not None:
-                        # subtract the current frame from the previous frame
-                        diff = cv2.absdiff(img_car, self.prev_car_frame)
-                        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-                        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-                        _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
-                        
-                        # check for movement by counting the number of non-zero pixels
-                        if cv2.countNonZero(thresh) > 0:
-                            self.moving_car_detected = True
-                            self.off_terrain = True
-                            self.time_terrain_tracker = 100
-                            print("Movement detected.")
-                        else:
-                            self.movement_detected = False
-                            print("No movement detected.")
-                            
-                    # update the previous frame
-                    self.prev_car_frame = img_car.copy()
-                
-                # increment the counter
-                self.car_frame_counter += 1
-
-            elif self.time_terrain_tracker >= 100 and self.time_terrain_tracker < 101:
-                linear_vel = 0.20
-                angular_vel = 1.1
-                
-            elif self.time_terrain_tracker >= 101 and self.time_terrain_tracker < 103:
-                linear_vel = 0.15
-                if(max_col < 600):
-                    max_col = 1280
-                print("x_coordinate max")
-                print(max_col)
-                angular_vel = self.pid.computeRight(max_col) 
-            
-            elif self.time_terrain_tracker >= 103 and self.time_terrain_tracker < 103.5:
-                linear_vel = 0
-                angular_vel = self.pid.computeRight(max_col)
-                # self.license_pub.publish(String('Vlandy,Andada,-1,7')) #End time for time trials
-            elif self.time_terrain_tracker >= 103.5 and self.time_terrain_tracker < 104.5:
-                linear_vel = 0.18
-                angular_vel = 0
-                print("Lase case")
-                angular_vel = 0
-            elif self.time_terrain_tracker >= 104.5 and self.time_terrain_tracker < 108.5:
-                linear_vel = 0.15
-            else:
-                linear_vel = 0
-                angular_vel = 0
-                self.license_pub.publish(String('Vlandy,pass,-1,7')) #End time for time trials
-
-
-
-
-            
-            twist = Twist()
-            twist.linear.x = linear_vel
-            twist.angular.z = angular_vel 
-            self.cmd_pub.publish(twist)
-            self.time_terrain_tracker += TIME_STEP
-            print("Terrain Timer\n")
-            print(self.time_terrain_tracker)
-            print("\n")
-        
     def clock_callback(self,msg):
         current_time = msg.clock
 
