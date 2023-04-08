@@ -34,7 +34,7 @@ class Controller:
             '/R1/pi_camera/image_raw', Image, self.image_callback)
         self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
         self.pid = PID(2.6, 0.20,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
-        self.pidLeft = PID(3, 0.24, LEFT_MOST_X_COORDINATE)
+        self.pidLeft = PID(2.4, 0.10, LEFT_MOST_X_COORDINATE)
         self.start_timer = 0
         self.terrain_timer = 0
         self.count_license_plates = 0
@@ -52,22 +52,28 @@ class Controller:
         self.speed_up = False
         self.start_speedup_timer = 0
 
+        self.off_terrain = False
+        self.min_col_detected = False
+        self.count_rising_edge = 0
+        self.state_inner_done = False
+        self.countResult = 0
+        self.state_detect_pedestrian = False
+        self.count_red_lines = 0
+        self.pedestrian_detected_timer = 0
+
+        self.grass_terrain_detected = False
+
+
         self.moving_car_detected = False
         self.car_frame_counter = 0
         self.prev_car_frame = None
-    
 
         self.clock_sub = rospy.Subscriber('/clock',Clock, self.clock_callback)
         self.license_pub = rospy.Publisher('/license_plate',String,queue_size=10)
         time.sleep(0.2)
-
         
         self.license_pub.publish(String('Vlandy,pass,0,VLAND7')) #Start Time
 
-        self.off_terrain = False
-
-        self.min_col_detected = False
-        self.count_rising_edge = 0
 
 
 
@@ -100,11 +106,11 @@ class Controller:
                 largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                 x, y, w, h, _ = stats[largest_label]
                 result = crop_image[y:y+h, x:x+w]
-                self.image_filename = f"images/{self.countResult}.jpg"
+                # self.image_filename = f"images/{self.countResult}.jpg"
                 self.countResult += 1
                 # cv2.imwrite(self.image_filename, cv_image)
                 # cv2.imshow("mask", result)
-                # cv2.waitKey(500)
+                # cv2.waitKey(1)
 
         except CvBridgeError as e:
             print(e)
@@ -136,77 +142,342 @@ class Controller:
 
         twist = Twist()
 
-        if self.start_timer < 0.5:
-            twist.linear.x = -0.05
-            twist.angular.z = 0 
-            self.cmd_pub.publish(twist)
-            print("case 1")
-        elif self.start_timer >= 0.5 and self.start_timer < 3:
-            twist.linear.x = 0
-            twist.angular.z = 1
-            self.cmd_pub.publish(twist)
-            print("case 2")
+        if self.state_detect_pedestrian == False and self.count_red_lines == 0:
+            if self.start_timer < 0.5:
+                twist.linear.x = -0.06
+                twist.angular.z = 0 
+                self.cmd_pub.publish(twist)
+                print("case 1")
+            elif self.start_timer >= 0.5 and self.start_timer < 3:
+                twist.linear.x = 0
+                twist.angular.z = 1
+                self.cmd_pub.publish(twist)
+                print("case 2")
 
-        elif self.min_col_detected == False:
-            twist.linear.x = 0
-            twist.angular.z = 1
-            self.cmd_pub.publish(twist)
-            if min_col in range(30,75):
-                self.min_col_detected = True
+            elif self.min_col_detected == False:
+                twist.linear.x = 0.01
+                twist.angular.z = 0.5
+                self.cmd_pub.publish(twist)
+                if min_col in range(30,75):
+                    self.min_col_detected = True
+                    twist.linear.x = 0
+                    twist.angular.z = 0
+                    self.cmd_pub.publish(twist)
+                    time.sleep(1)
+                print("case 3")
+            elif self.moving_car_detected == False:
+                try:
+                    cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+                    img_car = cv_image[450:720, 300: 700]
+                    # cv2.imshow("image", img_car)
+                    # cv2.waitKey(1)
+                    # # plt.show()
+                except CvBridgeError as e:
+                    print(e)
+
+                if self.car_frame_counter % 4 == 0:
+                    if self.prev_car_frame is not None:
+                        # subtract the current frame from the previous frame
+                        diff = cv2.absdiff(img_car, self.prev_car_frame)
+                        gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+                        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+                        _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
+                        print("nonzero\n")
+                        print(cv2.countNonZero(thresh))
+                        
+                        # check for movement by counting the number of non-zero pixels
+                        if cv2.countNonZero(thresh) > 4000:
+                            self.moving_car_detected = True
+                            self.start_timer = 3
+                            time.sleep(0.8)
+                            print("Movement detected.")
+                        else:
+                            print("No movement detected.")
+                            
+                    # update the previous frame
+                    self.prev_car_frame = img_car.copy()
+                
+                # increment the counter
+                self.car_frame_counter += 1
+
+                print("case 4")
+            elif self.start_timer >= 3 and self.start_timer < 9.2:
+                twist = Twist()
+                twist.linear.x = 0.21
+                if(min_col > 1000):
+                    min_col = 50
+                    self.count_rising_edge += 1
+                twist.angular.z = self.pidLeft.computeLeft(min_col) * 1.2
+                self.cmd_pub.publish(twist)
+
+                print(self.count_rising_edge)
+                print("case 4")
+
+            elif self.start_timer >= 9.2 and self.start_timer < 11:
+                twist = Twist() 
+                twist.linear.x = 0.24
+                twist.angular.z = self.pid.computeRight(max_col)
+                self.cmd_pub.publish(twist)
+                print("case 5")
+            
+            elif self.start_timer >= 11 and self.state_inner_done == False:
+                #Detect Red Line Process
+                img_red = cv_image[700:720, 900: 1100]
+                # Convert the image to HSV color space
+                hsv_img_red = cv2.cvtColor(img_red, cv2.COLOR_BGR2HSV)
+
+                # Define the range of red color in HSV color space
+                lower_red = np.array([0, 50, 50])
+                upper_red = np.array([10, 255, 255])
+
+                # Create a mask using the range of red color
+                mask1_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Define the range of red color in HSV color space
+                lower_red = np.array([170, 50, 50])
+                upper_red = np.array([180, 255, 255])
+
+                # Create another mask using the range of red color
+                mask2_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Combine the masks
+                mask_red = mask1_red + mask2_red
+
+                # Apply the mask to the original image
+                red_img = cv2.bitwise_and(img_red, img_red, mask=mask_red)
+
+                gray_red = cv2.cvtColor(red_img, cv2.COLOR_BGR2GRAY)
+
+                ##remove noise using gaussian blur 
+                blured_image_red = cv2.GaussianBlur(gray_red, (3,3), 0)
+
+                ##detect edges from luminosity change 
+                edges_red = cv2.Canny(blured_image_red, 100, 200)
+
+                red_line_points = np.count_nonzero(edges_red)
+                
+                if red_line_points > 0:
+                    self.state_inner_done = True
+
+                twist = Twist()
+                twist.linear.x = 0.090
+                if(min_col > 1000):
+                    min_col = 0
+                twist.angular.z = self.pidLeft.computeLeft(min_col) * 0.95
+                self.cmd_pub.publish(twist)
+
+                print("Case 6")
+            else:
+                twist = Twist()
                 twist.linear.x = 0
                 twist.angular.z = 0
                 self.cmd_pub.publish(twist)
-            print("case 3")
-        elif self.moving_car_detected == False:
-            try:
-                cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-                img_car = cv_image[450:720, 300: 700]
-                # cv2.imshow("image", img_car)
-                # cv2.waitKey(1)
-                # # plt.show()
-            except CvBridgeError as e:
-                print(e)
+                self.state_detect_pedestrian = True
+                self.count_red_lines += 1
+                time.sleep(2.5)
 
-            if self.car_frame_counter % 4 == 0:
-                if self.prev_car_frame is not None:
+        elif self.state_detect_pedestrian == True:
+            twist = Twist()
+            twist.linear.x = 0
+            twist.angular.z = 0
+            self.cmd_pub.publish(twist)
+            img_ped = cv_image[250:500, 550:650]
+
+            if self.frame_counter % 2 == 0:
+                if self.prev_frame is not None:
                     # subtract the current frame from the previous frame
-                    diff = cv2.absdiff(img_car, self.prev_car_frame)
+                    diff = cv2.absdiff(img_ped, self.prev_frame)
                     gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
                     blur = cv2.GaussianBlur(gray, (5, 5), 0)
                     _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
-                    print("nonzero\n")
+
                     print(cv2.countNonZero(thresh))
                     
                     # check for movement by counting the number of non-zero pixels
-                    if cv2.countNonZero(thresh) > 1000:
-                        self.moving_car_detected = True
-                        self.start_timer = 3
-                        time.sleep(0.5)
+                    if cv2.countNonZero(thresh) > 2000:
+                        print(cv2.countNonZero(thresh))
+                        self.state_detect_pedestrian = False
+                        self.pedestrian_detected_timer = self.start_timer
                         print("Movement detected.")
-                    else:
+                    else:   
                         print("No movement detected.")
                         
                 # update the previous frame
-                self.prev_car_frame = img_car.copy()
+                self.prev_frame = img_ped.copy()
+                # cv2.imshow("Frame", self.prev_frame)
+                # cv2.waitKey(1)
             
             # increment the counter
-            self.car_frame_counter += 1
+            self.frame_counter += 1
+            print("Pedestrian waiting state")
 
-            print("case 4")
-        else:
+        elif self.grass_terrain_detected == True:
+            try:
+                # Pass the image through the model
+                angular_vel = float(self.telemetry(cv_image, model))
+            except Exception as e:
+                print("Error predicting: ", str(e))
+
+            if self.start_timer < 0.80:
+                linear_vel = 0.1925
+
+            elif self.start_timer >= 0.80 and self.start_timer < 2.5:
+                linear_vel = 0.07
+                angular_vel = angular_vel * 2.6
+
+            elif self.start_timer >= 2.5 and self.start_timer < 8:
+                linear_vel = 0.15
+
+            # elif self.start_timer >= 18.25 and self.start_timer < 22:
+            #     linear_vel = 0.04
+            #     angular_vel = angular_vel * 2.4
+            
+            # elif self.start_timer >= 22 and self.start_timer < 25.5:
+            #     linear_vel = 0.10
+            #     angular_vel = angular_vel 
+            
+            elif self.start_timer >= 8 and self.start_timer < 14:
+                linear_vel = 0.06
+                angular_vel = angular_vel * 2
+
+            else:
+                linear_vel = 0
+                angular_vel = 0
+
+
             twist = Twist()
-            twist.linear.x = 0.20
-            if(min_col > 1000):
-                min_col = 50
-                self.count_rising_edge += 1
-            twist.angular.z = self.pidLeft.computeLeft(min_col) * 1.2
+            twist.linear.x = linear_vel
+            twist.angular.z = angular_vel
             self.cmd_pub.publish(twist)
 
-            print(self.count_rising_edge)
-            print("case 5")
+        else:
+            twist = Twist() 
+            twist.linear.x = 0.25
+            twist.angular.z = self.pid.computeRight(max_col)
+            self.cmd_pub.publish(twist)
+
+            if ((self.start_timer - self.pedestrian_detected_timer) > 5 and self.count_red_lines < 2):
+                 #Detect Red Line Process
+                img_red = cv_image[700:720, 900: 1100]
+                # Convert the image to HSV color space
+                hsv_img_red = cv2.cvtColor(img_red, cv2.COLOR_BGR2HSV)
+
+                # Define the range of red color in HSV color space
+                lower_red = np.array([0, 50, 50])
+                upper_red = np.array([10, 255, 255])
+
+                # Create a mask using the range of red color
+                mask1_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Define the range of red color in HSV color space
+                lower_red = np.array([170, 50, 50])
+                upper_red = np.array([180, 255, 255])
+
+                # Create another mask using the range of red color
+                mask2_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Combine the masks
+                mask_red = mask1_red + mask2_red
+
+                # Apply the mask to the original image
+                red_img = cv2.bitwise_and(img_red, img_red, mask=mask_red)
+
+                gray_red = cv2.cvtColor(red_img, cv2.COLOR_BGR2GRAY)
+
+                ##remove noise using gaussian blur 
+                blured_image_red = cv2.GaussianBlur(gray_red, (3,3), 0)
+
+                ##detect edges from luminosity change 
+                edges_red = cv2.Canny(blured_image_red, 100, 200)
+
+                red_line_points = np.count_nonzero(edges_red)
+            
+                if red_line_points > 0:
+                    self.prev_frame = None
+                    twist = Twist()
+                    twist.linear.x = 0
+                    twist.angular.z = 0
+                    self.cmd_pub.publish(twist)
+                    self.state_detect_pedestrian = True
+                    self.count_red_lines += 1
+                    time.sleep(2)
+                    print("Last Red Line Count")
+                    print(self.count_red_lines)
+
+            if self.count_red_lines == 2:
+                lower_green = np.array([10, 70, 100])
+                upper_green = np.array([35, 160, 200])
+
+                # Create mask for yellow-green grass
+                green_mask = cv2.inRange(hsv_image, lower_green, upper_green)
+
+                # Define color thresholds for white lanes in HSV
+                lower_white = np.array([130, 0, 200])
+                upper_white = np.array([255, 100, 255])
+
+                # Create mask for white lanes
+                white_mask = cv2.inRange(hsv_image, lower_white, upper_white)
+
+                # cv2.imshow("white" , white_mask)
+                # cv2.waitKey(1)
+
+                # Combine masks using bitwise_and()
+                mask = cv2.bitwise_or(green_mask, white_mask)
+
+                # Close any gaps in the mask
+                kernel = np.ones((5,5), np.uint8)
+                mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+                # Apply mask to original image
+                masked_img = cv2.bitwise_and(cv_image, cv_image, mask=mask)
+
+                gray = cv2.cvtColor(masked_img, cv2.COLOR_BGR2GRAY)
+
+                ##remove noise using gaussian blur 
+                blured_image = cv2.GaussianBlur(gray, (3,3), 0)
+
+                ##detect edges from luminosity change 
+                edges = cv2.Canny(blured_image, 100, 200)
+
+                ##mask polygon onto black plane 
+                isolated = self.region(edges)
+
+                # Detect lines using the Hough transform
+                lines = cv2.HoughLinesP(isolated, 1, np.pi/180, 50, minLineLength=20, maxLineGap=10)
+
+                max_x = 0
+
+                # HOUGH LINES
+                if(lines is not None):
+                    for line in lines:
+                        x1, y1, x2, y2 = line[0]
+
+                        start_x = min(x1,x2)
+                        end_x = max(x1,x2)
+
+                        if end_x > max_x:
+                            max_x = end_x
+
+                        cv2.line(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+                        self.grass_terrain_detected = True
+                        break
+                    twist = Twist()
+                    twist.linear.x = 0
+                    twist.angular.z = 0
+                    self.cmd_pub.publish(twist)
+                    time.sleep(2)
+                    self.start_timer = 0
+                    print("Terrain Detected Pause")
+
+
+
+
 
         self.start_timer += TIME_STEP
         print(self.start_timer)
+
+    
 
         
 
