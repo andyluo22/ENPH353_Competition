@@ -23,10 +23,14 @@ LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good g
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
 
-model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
+# model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
+# model = tf.keras.models.load_model(model_path)
+
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction.h5'
 model = tf.keras.models.load_model(model_path)
 
-
+model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/SILLY_LITTLE_CHAR_WORKING.h5'
+model_license = tf.keras.models.load_model(model_license_path)
 class Controller:
     def __init__(self):
         self.bridge = CvBridge()
@@ -67,6 +71,8 @@ class Controller:
         self.moving_car_detected = False
         self.car_frame_counter = 0
         self.prev_car_frame = None
+        self.hog = cv2.HOGDescriptor()
+        self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
 
         self.clock_sub = rospy.Subscriber('/clock',Clock, self.clock_callback)
         self.license_pub = rospy.Publisher('/license_plate',String,queue_size=10)
@@ -86,6 +92,7 @@ class Controller:
 
             height, width = hsv_image.shape[:2]
             crop_image = cv_image[int(height*0.6):height, 0:width]
+            crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
             hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
 
             hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
@@ -106,8 +113,45 @@ class Controller:
                 largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                 x, y, w, h, _ = stats[largest_label]
                 result = crop_image[y:y+h, x:x+w]
+
+                # cv2.imshow("Result", result)
+                # cv2.waitKey(1)
                 # self.image_filename = f"images/{self.countResult}.jpg"
+                char1 = result[0:h, 0:int(w*0.8/3)]
+                print(char1.shape)
+
+                cv2.imshow("char1", char1)
+                cv2.waitKey(1)
+
+                char1 = cv2.resize(char1, (100, 120))
+                char1 = np.expand_dims(char1, axis=0)
+                # print(char1.shape)
+                # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
+                # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
+                # # char4 = result[0:h, int(w*2.3/3): w]
+
+                char1_pred = model_license.predict(char1)[0]
+
+                print(char1_pred)
+                char1String = self.onehot_to_string(char1_pred)
+
+                index = np.argmax(char1String)
+
+                print(index)
+                # char2_pred = model_license.predict(char2)
+                # char2String = self.onehot_to_string(char2_pred)
+                # char3_pred = model_license.predict(char3)
+                # char3String = self.onehot_to_string(char3_pred)
+                # char4_pred = model_license.predict(char4)
+                # char4String = self.onehot_to_string(char4_pred)
+
+                print(char1String)
+
+
+
+                
                 self.countResult += 1
+                
                 # cv2.imwrite(self.image_filename, cv_image)
                 # cv2.imshow("mask", result)
                 # cv2.waitKey(1)
@@ -201,6 +245,7 @@ class Controller:
                 self.car_frame_counter += 1
 
                 print("case 4")
+                
             elif self.start_timer >= 3 and self.start_timer < 9.2:
                 twist = Twist()
                 twist.linear.x = 0.21
@@ -274,7 +319,7 @@ class Controller:
                 self.cmd_pub.publish(twist)
                 self.state_detect_pedestrian = True
                 self.count_red_lines += 1
-                time.sleep(2.5)
+                time.sleep(1)
 
         elif self.state_detect_pedestrian == True:
             twist = Twist()
@@ -283,76 +328,63 @@ class Controller:
             self.cmd_pub.publish(twist)
             img_ped = cv_image[250:500, 550:650]
 
-            if self.frame_counter % 2 == 0:
-                if self.prev_frame is not None:
-                    # subtract the current frame from the previous frame
-                    diff = cv2.absdiff(img_ped, self.prev_frame)
-                    gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-                    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-                    _, thresh = cv2.threshold(blur, 20, 255, cv2.THRESH_BINARY)
+            gray = cv2.cvtColor(img_ped, cv2.COLOR_RGB2GRAY)
 
-                    print(cv2.countNonZero(thresh))
-                    
-                    # check for movement by counting the number of non-zero pixels
-                    if cv2.countNonZero(thresh) > 2000:
-                        print(cv2.countNonZero(thresh))
-                        self.state_detect_pedestrian = False
-                        self.pedestrian_detected_timer = self.start_timer
-                        print("Movement detected.")
-                    else:   
-                        print("No movement detected.")
-                        
-                # update the previous frame
-                self.prev_frame = img_ped.copy()
-                # cv2.imshow("Frame", self.prev_frame)
-                # cv2.waitKey(1)
-            
-            # increment the counter
-            self.frame_counter += 1
-            print("Pedestrian waiting state")
+            # detect people in the image
+            # returns the bounding boxes for the detected objects
+            boxes, weights = self.hog.detectMultiScale(img_ped, winStride=(8,8) )
+
+            boxes = np.array([[x, y, x + w, y + h] for (x, y, w, h) in boxes])
+
+            if len(boxes) == 0:
+                print("No pedestrians detected.")
+            else:
+                self.state_detect_pedestrian = False
+                self.pedestrian_detected_timer = self.start_timer
+                print("Go!")
 
         elif self.grass_terrain_detected == True:
             try:
-                # Pass the image through the model
-                angular_vel = float(self.telemetry(cv_image, model))
-            except Exception as e:
-                print("Error predicting: ", str(e))
+                cv_image = self.preProcessing(cv_image)
+        
+            except CvBridgeError as e:
+                print(e)
 
-            if self.start_timer < 0.80:
-                linear_vel = 0.1925
+            try:
+                # Pass the image through the model and get the predicted class
+                prediction = model.predict(np.array([cv_image]))
 
-            elif self.start_timer >= 0.80 and self.start_timer < 2.5:
-                linear_vel = 0.07
-                angular_vel = angular_vel * 2.6
+                max_index = np.argmax(prediction)
+                if max_index == 0:
+                    # Left
+                    angular_vel = 0.80
+                elif max_index == 1:
+                    # Straight
+                    angular_vel = 0.0
+                else:
+                    # Right
+                    angular_vel = -0.80
 
-            elif self.start_timer >= 2.5 and self.start_timer < 8:
                 linear_vel = 0.15
 
-            # elif self.start_timer >= 18.25 and self.start_timer < 22:
-            #     linear_vel = 0.04
-            #     angular_vel = angular_vel * 2.4
-            
-            # elif self.start_timer >= 22 and self.start_timer < 25.5:
-            #     linear_vel = 0.10
-            #     angular_vel = angular_vel 
-            
-            elif self.start_timer >= 8 and self.start_timer < 14:
-                linear_vel = 0.06
-                angular_vel = angular_vel * 2
-
-            else:
-                linear_vel = 0
-                angular_vel = 0
-
+                print(prediction)
+                
+                # # Map the predicted class to the corresponding steering angle
+                # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
+                # angular_vel = steering_angles[pred_class]
+                # linear_vel = 0.15
+            except Exception as e:
+                print("Error predicting: ", str(e))
 
             twist = Twist()
             twist.linear.x = linear_vel
             twist.angular.z = angular_vel
             self.cmd_pub.publish(twist)
 
+
         else:
             twist = Twist() 
-            twist.linear.x = 0.25
+            twist.linear.x = 0.27
             twist.angular.z = self.pid.computeRight(max_col)
             self.cmd_pub.publish(twist)
 
@@ -554,6 +586,21 @@ class Controller:
         print(angular_z)
         return angular_z
     
+    def onehot_to_string(onehot):
+        # Define a dictionary mapping indices to characters
+        char_dict = {
+            0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H", 8: "I",
+            9: "J", 10: "K", 11: "L", 12: "M", 13: "N", 14: "O", 15: "P", 16: "Q", 17: "R",
+            18: "S", 19: "T", 20: "U", 21: "V", 22: "W", 23: "X", 24: "Y", 25: "Z",
+            26: "0", 27: "1", 28: "2", 29: "3", 30: "4", 31: "5", 32: "6", 33: "7", 34: "8", 35: "9"
+        }
+
+        # Find the index of the maximum value in the one-hot vector
+        index = np.argmax(onehot)
+
+        # Return the corresponding character from the dictionary
+        return char_dict[index]
+        
 
 
 class PID:
