@@ -23,9 +23,6 @@ LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good g
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
 
-# model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
-# model = tf.keras.models.load_model(model_path)
-
 model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
 model = tf.keras.models.load_model(model_path)
 
@@ -190,21 +187,63 @@ class Controller:
         if self.grass_terrain_detected == True:
             try:
                 # cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-                cv_image = self.preProcessing(cv_image)
+                cv_pred = self.preProcessing(cv_image)
             
             except CvBridgeError as e:
                 print(e)
+            # Pass the image through the model and get the predicted class
+            if self.start_timer >= 18.5:
+                twist = Twist() 
+                twist.linear.x = 0.24
+                twist.angular.z = self.pid.computeRight(max_col)
+                self.cmd_pub.publish(twist)
+                print("about to finish outerloop")
+                #Detect Red Line Process
+                img_red = cv_image[700:720, 900: 1100]
+                # Convert the image to HSV color space
+                hsv_img_red = cv2.cvtColor(img_red, cv2.COLOR_BGR2HSV)
 
-            try:
-                # Pass the image through the model and get the predicted class
-                if self.start_timer >= 18:
-                    twist = Twist() 
-                    twist.linear.x = 0.24
-                    twist.angular.z = self.pid.computeRight(max_col)
+                # Define the range of red color in HSV color space
+                lower_red = np.array([0, 50, 50])
+                upper_red = np.array([10, 255, 255])
+
+                # Create a mask using the range of red color
+                mask1_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Define the range of red color in HSV color space
+                lower_red = np.array([170, 50, 50])
+                upper_red = np.array([180, 255, 255])
+
+                # Create another mask using the range of red color
+                mask2_red = cv2.inRange(hsv_img_red, lower_red, upper_red)
+
+                # Combine the masks
+                mask_red = mask1_red + mask2_red
+
+                # Apply the mask to the original image
+                red_img = cv2.bitwise_and(img_red, img_red, mask=mask_red)
+
+                gray_red = cv2.cvtColor(red_img, cv2.COLOR_BGR2GRAY)
+
+                ##remove noise using gaussian blur 
+                blured_image_red = cv2.GaussianBlur(gray_red, (3,3), 0)
+
+                ##detect edges from luminosity change 
+                edges_red = cv2.Canny(blured_image_red, 100, 200)
+
+                red_line_points = np.count_nonzero(edges_red)
+                
+                if red_line_points > 0:
+                    twist = Twist()
+                    twist.linear.x = 0
+                    twist.angular.z = 0
                     self.cmd_pub.publish(twist)
-                    print("case 5")
-                else:
-                    prediction = model.predict(np.array([cv_image]))
+                    self.license_pub.publish(String('Vlandy,pass,-1,VLANDFinished')) #End Time
+                    print("The end")
+                    time.sleep(20)
+            else:
+                try:
+                    prediction = model.predict(np.array([cv_pred]))
 
                     max_index = np.argmax(prediction)
                     if max_index == 0:
@@ -228,13 +267,13 @@ class Controller:
                 # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
                 # angular_vel = steering_angles[pred_class]
                 # linear_vel = 0.15
-            except Exception as e:
-                print("Error predicting: ", str(e))
+                except Exception as e:
+                    print("Error predicting: ", str(e))
 
-            # twist = Twist()
-            # twist.linear.x = linear_vel
-            # twist.angular.z = angular_vel
-            # self.cmd_pub.publish(twist)
+                # twist = Twist()
+                # twist.linear.x = linear_vel
+                # twist.angular.z = angular_vel
+                # self.cmd_pub.publish(twist)
 
         elif self.state_detect_pedestrian == False and self.count_red_lines == 0:
             if self.start_timer < 0.5:
