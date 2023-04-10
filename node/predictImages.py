@@ -8,212 +8,194 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge, CvBridgeError
 import sys
+import tensorflow as tf
+import time
+from rosgraph_msgs.msg import Clock
+from std_msgs.msg import String
 
-CAM_IMAGE_HEIGHT = 480
-CAM_IMAGE_WIDTH = 640
-TIME_STEP = 0.5
+
+CAM_IMAGE_HEIGHT = 720
+CAM_IMAGE_WIDTH = 1280
+TIME_STEP = 0.040
 PID_SCALE = 250
+SCALE_SPEED = 10
 LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good give or take
+RIGHT_MOST_X_COORDINATE = 1220
+LEFT_MOST_X_COORDINATE = 60
+
+# model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
+# model = tf.keras.models.load_model(model_path)
+
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
+model = tf.keras.models.load_model(model_path)
+
+model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModel.h5'
+model_license = tf.keras.models.load_model(model_license_path)
 
 
 class Controller:
+    # def __init__(self):
+    #     self.bridge = CvBridge()
+    #     self.image_sub = rospy.Subscriber(
+    #         '/R1/pi_camera/image_raw', Image, self.image_callback)
+    #     self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
+    #     self.pid = PID(14,2,CAM_IMAGE_WIDTH/2)
+
+    #     # Create a timer that will call the update_angular_vel function every 100 ms
     def __init__(self):
         self.bridge = CvBridge()
         self.image_sub = rospy.Subscriber(
             '/R1/pi_camera/image_raw', Image, self.image_callback)
         self.cmd_pub = rospy.Publisher('/R1/cmd_vel', Twist, queue_size=10)
-        self.pid = PID(14,2,CAM_IMAGE_WIDTH/2)
+        self.pid = PID(2.6, 0.20,RIGHT_MOST_X_COORDINATE) # KP = 2, KD = 0.5, and x speed = 0.25 below was rlly good
+        self.pidLeft = PID(2.4, 0.10, LEFT_MOST_X_COORDINATE)
+        self.start_timer = 0
+        self.terrain_timer = 0
+        self.count_license_plates = 0
+        self.countTerrain = 0
+
+        self.command_timer = time.time()
+        self.terrain_timer = 0
+        self.is_turning = False
+        self.time_terrain_tracker = 0
+
+        self.movement_detected = True
+        self.count_red_lines = 0
+        self.prev_frame = None  # to store the previous frame
+        self.frame_counter = 0  # to count the frames
+        self.speed_up = False
+        self.start_speedup_timer = 0
+
+        self.off_terrain = False
+        self.min_col_detected = False
+        self.count_rising_edge = 0
+        self.state_inner_done = False
+        self.countResult = 0
+        self.state_detect_pedestrian = False
+        self.count_red_lines = 0
+        self.pedestrian_detected_timer = 0
+
+        self.grass_terrain_detected = False
+
+
+        self.moving_car_detected = False
+        self.car_frame_counter = 0
+        self.prev_car_frame = None
+        self.hog = cv2.HOGDescriptor()
+        self.hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+
+        self.license_pub = rospy.Publisher('/license_plate',String,queue_size=10)
+        time.sleep(0.2)
+        
+        self.license_pub.publish(String('Vlandy,pass,0,VLAND7')) #Start Time
+
 
 
     def image_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
-            # h, s, v = cv2.split(hsv_image)
-            # print("Hue\n")
-            # print(str(h) + "\n")
-            # print("Saturation\n")
-            # print(str(s) + "\n")
-            # print("Value\n")
-            # print(str(v) + "\n")
-            # cv2.imshow("raw", cv_image)
-            # cv2.waitKey(1)
-            # Extract region of interest
-            # roi = hsv_image[590:720, 0:1240, :]
-            
-            # # Calculate mean of hue, saturation, and value channels of ROI
-            # mean_h = np.mean(roi[:,:,0])
-            # mean_s = np.mean(roi[:,:,1])
-            # mean_v = np.mean(roi[:,:,2])
-            
-            # print("Mean Hue:", mean_h)
-            # print("Mean Saturation:", mean_s)
-            # print("Mean Value:", mean_v)
-            
-            # plt.show()
+
+            height, width = hsv_image.shape[:2]
+            crop_image = cv_image[int(height*0.6):height, 0:width]
+            crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+            hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+            hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+            #define the lower and upper hsv values for the hsv colors
+            lower_hsv = np.uint8(np.array([100, 0, 80]))
+            upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+            # mask and extract the license plate
+            mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+            mask_bin = mask.astype(np.uint8) * 255
+
+            # Count the number of blue pixels in the ROI
+            pixel_count = cv2.countNonZero(mask_bin)
+            if(pixel_count>3300):
+                _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                x, y, w, h, _ = stats[largest_label]
+                result = crop_image[y:y+h, x:x+w]
+
+                # cv2.imshow("Result", result)
+                # cv2.waitKey(1)
+                # self.image_filename = f"images/{self.countResult}.jpg"
+                char1 = result[0:h, 0:int(w*0.8/3)]
+                print(char1.shape)
+
+                # cv2.imshow("char1", char1)
+                # cv2.waitKey(1)
+
+                char1 = cv2.resize(char1, (100, 120))
+                char1 = np.expand_dims(char1, axis=0)
+                # print(char1.shape)
+                # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
+                # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
+                # # char4 = result[0:h, int(w*2.3/3): w]
+
+                char1_pred = model_license.predict(char1)[0]
+
+                print(char1_pred)
+                char1String = self.onehot_to_string(char1_pred)
+
+                index = np.argmax(char1String)
+
+                print(index)
+                # char2_pred = model_license.predict(char2)
+                # char2String = self.onehot_to_string(char2_pred)
+                # char3_pred = model_license.predict(char3)
+                # char3String = self.onehot_to_string(char3_pred)
+                # char4_pred = model_license.predict(char4)
+                # char4String = self.onehot_to_string(char4_pred)
+
+                print(char1String)
+
+
+
+                
+                self.countResult += 1
+                
+                # cv2.imwrite(self.image_filename, cv_image)
+                # cv2.imshow("mask", result)
+                # cv2.waitKey(1)
+            cv_image = self.preProcessing(cv_image)
+        
         except CvBridgeError as e:
             print(e)
 
-        try:
-            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
+        # try:
+        #     # Pass the image through the model and get the predicted class
+        #     prediction = model.predict(np.array([cv_image]))
 
+        #     max_index = np.argmax(prediction)
+        #     if max_index == 0:
+        #         # Left
+        #         angular_vel = 0.64
+        #     elif max_index == 1:
+        #         # Straight
+        #         angular_vel = 0.0
+        #     else:
+        #         # Right
+        #         angular_vel = -0.64
 
-            # plt.show()
-        except CvBridgeError as e:
-            print(e)
+        #     linear_vel = 0.11
+        #     print(prediction)
+            
+        #     # # Map the predicted class to the corresponding steering angle
+        #     # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
+        #     # angular_vel = steering_angles[pred_class]
+        #     # linear_vel = 0.15
+        # except Exception as e:
+        #     print("Error predicting: ", str(e))
 
-        state = np.zeros(10, dtype=np.int)
+        # twist = Twist()
+        # twist.linear.x = linear_vel
+        # twist.angular.z = angular_vel
+        # self.cmd_pub.publish(twist)
 
-        copy = np.copy(cv_image)
-
-        # ----------------------------NON-HSV
-        gray = cv2.cvtColor(copy, cv2.COLOR_BGR2GRAY)
-
-        blured_image = cv2.GaussianBlur(gray, (3,3), 0)
-
-        edges = cv2.Canny(blured_image, 0, 50)
-
-        # cv2.imshow("edges", edges)
-        # cv2.waitKey(1)
-
-        isolated = self.region(edges)
-
-        # cv2.imshow("isolated", isolated)
-        # cv2.waitKey(1)
-
-        row_indexes, col_indexes = np.nonzero(isolated)
-        max_col = 0
-        min_col = 0
-
-        # Find find left side of edge and right side of edge
-        if len(col_indexes) > 0:
-            max_col = max(col_indexes)
-            min_col = min(col_indexes)
-
-        # cv2.imshow("raw", cv_image)
-        # cv2.waitKey(1)
-
-        # ----------------------------HSV
-
-        lower_green = np.array([20, 90, 100])
-        upper_green = np.array([40, 100, 200])
-
-        # Create mask for yellow-green grass
-        green_mask = cv2.inRange(hsv_image, lower_green, upper_green)
-
-        # Define color thresholds for white lanes in HSV
-        lower_white = np.array([130, 0, 200])
-        upper_white = np.array([255, 100, 255])
-
-        # Create mask for white lanes
-        white_mask = cv2.inRange(hsv_image, lower_white, upper_white)
-
-        # cv2.imshow("white" , white_mask)
-        # cv2.waitKey(1)
-
-        # Combine masks using bitwise_and()
-        mask = cv2.bitwise_or(green_mask, white_mask)
-
-        # Close any gaps in the mask
-        kernel = np.ones((5,5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        cv2.imshow("raw", mask)
-        cv2.waitKey(1)
-
-        # Apply mask to original image
-        masked_img = cv2.bitwise_and(cv_image, cv_image, mask=mask)
-
-        gray = cv2.cvtColor(masked_img, cv2.COLOR_BGR2GRAY)
-
-        ##remove noise using gaussian blur 
-        blured_image = cv2.GaussianBlur(gray, (3,3), 0)
-
-        ##detect edges from luminosity change 
-        edges = cv2.Canny(blured_image, 100, 200)
-
-        ##mask polygon onto black plane 
-        isolated = self.region(edges)
-
-        # Detect lines using the Hough transform
-        lines = cv2.HoughLinesP(isolated, 1, np.pi/180, 50, minLineLength=20, maxLineGap=10)
-
-        max_x = 0
-
-        # HOUGH LINES
-        if(lines is not None):
-            for line in lines:
-                x1, y1, x2, y2 = line[0]
-
-                start_x = min(x1,x2)
-                end_x = max(x1,x2)
-
-                if end_x > max_x:
-                    max_x = end_x
-
-                cv2.line(cv_image, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-        # cv2.imshow("raw", cv_image)
-        # cv2.waitKey(1)
-
-    
-
-
-        # # --------------------------------sUPER GOOD WHITE LANE MASKING
-        # # Define color thresholds for white lanes in HSV
-        # lower_white = np.array([0, 0, 200])
-        # upper_white = np.array([255, 30, 255])
-
-        # # Create mask for white lanes
-        # mask = cv2.inRange(hsv_image, lower_white, upper_white)
-
-        # # Close any gaps in the mask
-        # kernel = np.ones((5,5), np.uouint8)
-        # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        # # Apply mask to original image
-        # masked_img = cv2.bitwise_and(cv_image, cv_image, mask=mask)
-        # # -------------------------------UNCOMMENT THIS BLOCK 
-
-        # # Define lower and upper bounds for green color in HSV
-        # lower_green = np.array([25, 50, 50])
-        # upper_green = np.array([85, 255, 255])
-
-        # # Create a mask of all pixels within the green color range
-        # mask = cv2.inRange(hsv_image, lower_green, upper_green)
-
-        # cv2.imshow("mask", masked_img)
-        # cv2.waitKey(1)
-
-        # # Apply the mask to the original image
-        # filtered_image = cv2.bitwise_and(cv_image, cv_image, mask=mask)
-
-
-    
-    def arrayOfPosition (self, width, x_coordinate, state):
-        newWidth = np.divide(width,10)
-
-        if(x_coordinate <= newWidth):
-            state[0] = 1
-        elif (x_coordinate <= newWidth * 2) :
-            state[1] = 1
-        elif (x_coordinate <= newWidth * 3) :
-            state[2] = 1
-        elif (x_coordinate <= newWidth * 4) :
-            state[3] = 1
-        elif (x_coordinate <= newWidth * 5) :
-            state[4] = 1
-        elif (x_coordinate <= newWidth * 6) :
-            state[5] = 1
-        elif (x_coordinate <= newWidth * 7) :
-            state[6] = 1
-        elif (x_coordinate <= newWidth * 8) :
-            state[7] = 1
-        elif (x_coordinate <= newWidth * 9) :
-            state[8] = 1
-        elif (x_coordinate <= newWidth * 10) :
-            state[9] = 1
 
     def region(self,image):
         height, width = image.shape
@@ -227,7 +209,16 @@ class Controller:
         mask = cv2.bitwise_and(image, mask)
 
         return mask
-
+    
+    def preProcessing(self,img):
+        img = img[400:720, 640:1280]
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+        img = cv2.GaussianBlur(img,(3,3),0)
+        img = cv2.resize(img, (200,66))
+        img = img / 255
+        return img
+    
+    
 class PID:
     ##Initialize/construct 
     def __init__(self,KP,KD,target):
