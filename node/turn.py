@@ -26,11 +26,12 @@ LEFT_MOST_X_COORDINATE = 60
 # model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelGoodie.h5'
 # model = tf.keras.models.load_model(model_path)
 
-model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction.h5'
+model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
 model = tf.keras.models.load_model(model_path)
 
 model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/SILLY_LITTLE_CHAR_WORKING.h5'
 model_license = tf.keras.models.load_model(model_license_path)
+
 class Controller:
     def __init__(self):
         self.bridge = CvBridge()
@@ -90,67 +91,67 @@ class Controller:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
-            height, width = hsv_image.shape[:2]
-            crop_image = cv_image[int(height*0.6):height, 0:width]
-            crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
-            hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+            # height, width = hsv_image.shape[:2]
+            # crop_image = cv_image[int(height*0.6):height, 0:width]
+            # crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+            # hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
 
-            hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
-            #define the lower and upper hsv values for the hsv colors
-            lower_hsv = np.uint8(np.array([100, 0, 80]))
-            upper_hsv = np.uint8(np.array([160, 70, 190]))
+            # hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+            # #define the lower and upper hsv values for the hsv colors
+            # lower_hsv = np.uint8(np.array([100, 0, 80]))
+            # upper_hsv = np.uint8(np.array([160, 70, 190]))
 
-            # mask and extract the license plate
-            mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+            # # mask and extract the license plate
+            # mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
 
-            mask_bin = mask.astype(np.uint8) * 255
+            # mask_bin = mask.astype(np.uint8) * 255
 
-            # Count the number of blue pixels in the ROI
-            pixel_count = cv2.countNonZero(mask_bin)
-            if(pixel_count>3300):
-                _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
-                largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-                x, y, w, h, _ = stats[largest_label]
-                result = crop_image[y:y+h, x:x+w]
+            # # Count the number of blue pixels in the ROI
+            # pixel_count = cv2.countNonZero(mask_bin)
+            # if(pixel_count>3300):
+            #     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+            #     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+            #     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+            #     x, y, w, h, _ = stats[largest_label]
+            #     result = crop_image[y:y+h, x:x+w]
 
-                # cv2.imshow("Result", result)
-                # cv2.waitKey(1)
-                # self.image_filename = f"images/{self.countResult}.jpg"
-                char1 = result[0:h, 0:int(w*0.8/3)]
-                print(char1.shape)
+            #     # cv2.imshow("Result", result)
+            #     # cv2.waitKey(1)
+            #     # self.image_filename = f"images/{self.countResult}.jpg"
+            #     char1 = result[0:h, 0:int(w*0.8/3)]
+            #     print(char1.shape)
 
-                cv2.imshow("char1", char1)
-                cv2.waitKey(1)
+            #     # cv2.imshow("char1", char1)
+            #     # cv2.waitKey(1)
 
-                char1 = cv2.resize(char1, (100, 120))
-                char1 = np.expand_dims(char1, axis=0)
-                # print(char1.shape)
-                # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
-                # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
-                # # char4 = result[0:h, int(w*2.3/3): w]
+            #     char1 = cv2.resize(char1, (100, 120))
+            #     char1 = np.expand_dims(char1, axis=0)
+            #     # print(char1.shape)
+            #     # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
+            #     # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
+            #     # # char4 = result[0:h, int(w*2.3/3): w]
 
-                char1_pred = model_license.predict(char1)[0]
+            #     char1_pred = model_license.predict(char1)[0]
 
-                print(char1_pred)
-                char1String = self.onehot_to_string(char1_pred)
+            #     print(char1_pred)
+            #     char1String = self.onehot_to_string(char1_pred)
 
-                index = np.argmax(char1String)
+            #     index = np.argmax(char1String)
 
-                print(index)
-                # char2_pred = model_license.predict(char2)
-                # char2String = self.onehot_to_string(char2_pred)
-                # char3_pred = model_license.predict(char3)
-                # char3String = self.onehot_to_string(char3_pred)
-                # char4_pred = model_license.predict(char4)
-                # char4String = self.onehot_to_string(char4_pred)
+            #     print(index)
+            #     # char2_pred = model_license.predict(char2)
+            #     # char2String = self.onehot_to_string(char2_pred)
+            #     # char3_pred = model_license.predict(char3)
+            #     # char3String = self.onehot_to_string(char3_pred)
+            #     # char4_pred = model_license.predict(char4)
+            #     # char4String = self.onehot_to_string(char4_pred)
 
-                print(char1String)
+            #     print(char1String)
 
 
 
                 
-                self.countResult += 1
+            #     self.countResult += 1
                 
                 # cv2.imwrite(self.image_filename, cv_image)
                 # cv2.imshow("mask", result)
@@ -186,7 +187,56 @@ class Controller:
 
         twist = Twist()
 
-        if self.state_detect_pedestrian == False and self.count_red_lines == 0:
+        if self.grass_terrain_detected == True:
+            try:
+                # cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+                cv_image = self.preProcessing(cv_image)
+            
+            except CvBridgeError as e:
+                print(e)
+
+            try:
+                # Pass the image through the model and get the predicted class
+                if self.start_timer >= 18:
+                    twist = Twist() 
+                    twist.linear.x = 0.24
+                    twist.angular.z = self.pid.computeRight(max_col)
+                    self.cmd_pub.publish(twist)
+                    print("case 5")
+                else:
+                    prediction = model.predict(np.array([cv_image]))
+
+                    max_index = np.argmax(prediction)
+                    if max_index == 0:
+                        # Left
+                        angular_vel = 0.7
+                    elif max_index == 1:
+                        # Straight
+                        angular_vel = 0.0
+                    else:
+                        # Right
+                        angular_vel = -0.7  
+
+                    linear_vel = 0.10
+                    print(prediction)
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = angular_vel
+                    self.cmd_pub.publish(twist)
+                    
+                # # Map the predicted class to the corresponding steering angle
+                # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
+                # angular_vel = steering_angles[pred_class]
+                # linear_vel = 0.15
+            except Exception as e:
+                print("Error predicting: ", str(e))
+
+            # twist = Twist()
+            # twist.linear.x = linear_vel
+            # twist.angular.z = angular_vel
+            # self.cmd_pub.publish(twist)
+
+        elif self.state_detect_pedestrian == False and self.count_red_lines == 0:
             if self.start_timer < 0.5:
                 twist.linear.x = -0.06
                 twist.angular.z = 0 
@@ -342,44 +392,6 @@ class Controller:
                 self.state_detect_pedestrian = False
                 self.pedestrian_detected_timer = self.start_timer
                 print("Go!")
-
-        elif self.grass_terrain_detected == True:
-            try:
-                cv_image = self.preProcessing(cv_image)
-        
-            except CvBridgeError as e:
-                print(e)
-
-            try:
-                # Pass the image through the model and get the predicted class
-                prediction = model.predict(np.array([cv_image]))
-
-                max_index = np.argmax(prediction)
-                if max_index == 0:
-                    # Left
-                    angular_vel = 0.80
-                elif max_index == 1:
-                    # Straight
-                    angular_vel = 0.0
-                else:
-                    # Right
-                    angular_vel = -0.80
-
-                linear_vel = 0.15
-
-                print(prediction)
-                
-                # # Map the predicted class to the corresponding steering angle
-                # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
-                # angular_vel = steering_angles[pred_class]
-                # linear_vel = 0.15
-            except Exception as e:
-                print("Error predicting: ", str(e))
-
-            twist = Twist()
-            twist.linear.x = linear_vel
-            twist.angular.z = angular_vel
-            self.cmd_pub.publish(twist)
 
 
         else:
