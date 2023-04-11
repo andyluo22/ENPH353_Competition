@@ -29,7 +29,7 @@ LEFT_MOST_X_COORDINATE = 60
 model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
 model = tf.keras.models.load_model(model_path)
 
-model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModel.h5'
+model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModelNewFontWhoDisUptrain.h5'
 model_license = tf.keras.models.load_model(model_license_path)
 
 
@@ -96,73 +96,97 @@ class Controller:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
-            height, width = hsv_image.shape[:2]
-            crop_image = cv_image[int(height*0.6):height, 0:width]
-            crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
-            hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+            if self.grass_terrain_detected == False:
+                height, width = hsv_image.shape[:2]
+                crop_image = cv_image[int(height*0.6):height, 0:width]
+                crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
 
-            hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
-            #define the lower and upper hsv values for the hsv colors
-            lower_hsv = np.uint8(np.array([100, 0, 80]))
-            upper_hsv = np.uint8(np.array([160, 70, 190]))
+                hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                #define the lower and upper hsv values for the hsv colors
+                lower_hsv = np.uint8(np.array([100, 0, 80]))
+                upper_hsv = np.uint8(np.array([160, 70, 190]))
 
-            # mask and extract the license plate
-            mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+                # mask and extract the license plate
+                mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
 
-            mask_bin = mask.astype(np.uint8) * 255
+                mask_bin = mask.astype(np.uint8) * 255
 
-            # Count the number of blue pixels in the ROI
-            pixel_count = cv2.countNonZero(mask_bin)
-            if(pixel_count>3300):
-                _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-                num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
-                largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-                x, y, w, h, _ = stats[largest_label]
-                result = crop_image[y:y+h, x:x+w]
+                # Count the number of blue pixels in the ROI
+                pixel_count = cv2.countNonZero(mask_bin)
+                if(pixel_count>3300):
+                    _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                    x, y, w, h, _ = stats[largest_label]
+                    result = crop_image[y:y+h, x:x+w]
 
-                # cv2.imshow("Result", result)
-                # cv2.waitKey(1)
-                # self.image_filename = f"images/{self.countResult}.jpg"
-                char1 = result[0:h, 0:int(w*0.8/3)]
-                print(char1.shape)
+                    cv2.imshow("license plate", result)
+                    cv2.waitKey(1)
 
-                # cv2.imshow("char1", char1)
-                # cv2.waitKey(1)
+                    _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
 
-                char1 = cv2.resize(char1, (100, 120))
-                char1 = np.expand_dims(char1, axis=0)
-                # print(char1.shape)
-                # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
-                # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
-                # # char4 = result[0:h, int(w*2.3/3): w]
+                    mask1 = cv2.bitwise_not(mask1)
 
-                char1_pred = model_license.predict(char1)[0]
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                    sizes = stats[1:, -1]
+                    component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
 
-                print(char1_pred)
-                char1String = self.onehot_to_string(char1_pred)
+                                        
+                    chars = []
+                    x_vals = []
+                    for i in component_indices:
+                        x, y, w, h = stats[i+1, :4]
+                        char = result[y-5:y+h+5, x-5:x+w+5]
+                        x_vals.append(x)
+                        chars.append(char)
 
-                index = np.argmax(char1String)
+                    sorted_x = np.argsort(x_vals)
+                    sorted_chars = [chars[i] for i in sorted_x]
 
-                print(index)
-                # char2_pred = model_license.predict(char2)
-                # char2String = self.onehot_to_string(char2_pred)
-                # char3_pred = model_license.predict(char3)
-                # char3String = self.onehot_to_string(char3_pred)
-                # char4_pred = model_license.predict(char4)
-                # char4String = self.onehot_to_string(char4_pred)
+                    char1 = cv2.resize(sorted_chars[0], (30,36))
+                    char2 = cv2.resize(sorted_chars[1], (30,36))
+                    char3 = cv2.resize(sorted_chars[2], (30,36))
+                    char4 = cv2.resize(sorted_chars[3], (30,36))
 
-                print(char1String)
+                    cv2.imshow("char1",char1)
+                    cv2.waitKey(1)
+                    cv2.imshow("char2",char2)
+                    cv2.waitKey(1)
+                    cv2.imshow("char3",char3)
+                    cv2.waitKey(1)
+                    cv2.imshow("char4",char4)
+                    cv2.waitKey(1)
 
 
+                    char1 = np.expand_dims(char1, axis=0)
+                    char2 = np.expand_dims(char2, axis=0)
+                    char3 = np.expand_dims(char3, axis=0)
+                    char4 = np.expand_dims(char4, axis=0)
 
-                
-                self.countResult += 1
-                
-                # cv2.imwrite(self.image_filename, cv_image)
-                # cv2.imshow("mask", result)
-                # cv2.waitKey(1)
-            cv_image = self.preProcessing(cv_image)
-        
+                    char1_pred = model_license.predict(char1)
+                    char2_pred = model_license.predict(char2)
+                    char3_pred = model_license.predict(char3)
+                    char4_pred = model_license.predict(char4)
+
+                    index1 = np.argmax(char1_pred)
+                    index2 = np.argmax(char2_pred)
+                    index3 = np.argmax(char3_pred)
+                    index4 = np.argmax(char4_pred)
+
+                    string1 = self.onehot_to_string(index1)
+                    string2 = self.onehot_to_string(index2)
+                    string3 = self.onehot_to_string(index3)
+                    string4 = self.onehot_to_string(index4)
+
+                    print("PREDICTED ------------------\n")
+                    print(string1 + string2 + string3 + string4)
+                    # print("PREDICTED ------------------\n")
+                    # print(index1)
+                    # print(index2)
+                    # print(index3)
+                    # print(index4)
+
         except CvBridgeError as e:
             print(e)
 
@@ -217,6 +241,19 @@ class Controller:
         img = cv2.resize(img, (200,66))
         img = img / 255
         return img
+    
+    def onehot_to_string(self, index):
+        # Define a dictionary mapping indices to characters
+        char_dict = {
+            0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H", 8: "I",
+            9: "J", 10: "K", 11: "L", 12: "M", 13: "N", 14: "O", 15: "P", 16: "Q", 17: "R",
+            18: "S", 19: "T", 20: "U", 21: "V", 22: "W", 23: "X", 24: "Y", 25: "Z",
+            26: "0", 27: "1", 28: "2", 29: "3", 30: "4", 31: "5", 32: "6", 33: "7", 34: "8", 35: "9"
+        }
+
+        # Find the index of the maximum value in the one-hot vector
+        # Return the corresponding character from the dictionary
+        return char_dict[index]
     
     
 class PID:

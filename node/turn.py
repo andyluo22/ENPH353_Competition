@@ -22,12 +22,25 @@ SCALE_SPEED = 10
 LANE_WIDTH = 80 # about 1/13 of 1280 so i just used 80 which seems like a good give or take
 RIGHT_MOST_X_COORDINATE = 1220
 LEFT_MOST_X_COORDINATE = 60
+LOWER_HSV = np.uint8(np.array([100, 0, 80]))
+UPPER_HSV = np.uint8(np.array([160, 70, 190]))
+
+CAR_ORDER = ["P7","P8","P3","P4","P5","P6","P1","P2"]
 
 model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
 model = tf.keras.models.load_model(model_path)
 
-model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/SILLY_LITTLE_CHAR_WORKING.h5'
+# OG Model
+# model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModel.h5'
+# model_license = tf.keras.models.load_model(model_license_path)
+
+# New Font GOOOd 
+# model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModelNewFontWhoDisUptrain.h5'
+# model_license = tf.keras.models.load_model(model_license_path)
+
+model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModelNewFontWhoDisUptrainTimesTwo.h5'
 model_license = tf.keras.models.load_model(model_license_path)
+
 
 class Controller:
     def __init__(self):
@@ -65,6 +78,11 @@ class Controller:
 
         self.grass_terrain_detected = False
 
+        # Store times when we stop to detect cars
+        self.countGrassCarOne = 0
+        self.countGrassCarTwo = 0
+        self.grassCarOneTimer = 0
+        self.grassCarTwoTimer = 0
 
         self.moving_car_detected = False
         self.car_frame_counter = 0
@@ -76,7 +94,7 @@ class Controller:
         self.license_pub = rospy.Publisher('/license_plate',String,queue_size=10)
         time.sleep(0.2)
         
-        self.license_pub.publish(String('Vlandy,pass,0,VLAND7')) #Start Time
+        self.license_pub.publish(String('Vlandy,Shrek,0,VLAND7')) #Start Time
 
 
 
@@ -88,71 +106,79 @@ class Controller:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
             hsv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
-            # height, width = hsv_image.shape[:2]
-            # crop_image = cv_image[int(height*0.6):height, 0:width]
-            # crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
-            # hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+            if self.grass_terrain_detected == False:
+                height, width = hsv_image.shape[:2]
+                crop_image = cv_image[int(height*0.6):height, 0:width]
+                crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
 
-            # hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
-            # #define the lower and upper hsv values for the hsv colors
-            # lower_hsv = np.uint8(np.array([100, 0, 80]))
-            # upper_hsv = np.uint8(np.array([160, 70, 190]))
+                hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                #define the lower and upper hsv values for the hsv colors
+                lower_hsv = np.uint8(np.array([100, 0, 80]))
+                upper_hsv = np.uint8(np.array([160, 70, 190]))
 
-            # # mask and extract the license plate
-            # mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+                # mask and extract the license plate
+                mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
 
-            # mask_bin = mask.astype(np.uint8) * 255
+                mask_bin = mask.astype(np.uint8) * 255
 
-            # # Count the number of blue pixels in the ROI
-            # pixel_count = cv2.countNonZero(mask_bin)
-            # if(pixel_count>3300):
-            #     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-            #     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
-            #     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
-            #     x, y, w, h, _ = stats[largest_label]
-            #     result = crop_image[y:y+h, x:x+w]
+                # Count the number of blue pixels in the ROI
+                pixel_count = cv2.countNonZero(mask_bin)
+                if(pixel_count>3300):
+                    _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                    x, y, w, h, _ = stats[largest_label]
+                    result = crop_image[y:y+h, x:x+w]
 
-            #     # cv2.imshow("Result", result)
-            #     # cv2.waitKey(1)
-            #     # self.image_filename = f"images/{self.countResult}.jpg"
-            #     char1 = result[0:h, 0:int(w*0.8/3)]
-            #     print(char1.shape)
+                    cv2.imshow("license plate", result)
+                    cv2.waitKey(1)
 
-            #     # cv2.imshow("char1", char1)
-            #     # cv2.waitKey(1)
+                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
 
-            #     char1 = cv2.resize(char1, (100, 120))
-            #     char1 = np.expand_dims(char1, axis=0)
-            #     # print(char1.shape)
-            #     # char2 = result[0:h, int(w*0.9/3): int(w*0.9/2)]
-            #     # char3 = result[0:h, int(w*1.2/2): int(w*2.3/3)]
-            #     # # char4 = result[0:h, int(w*2.3/3): w]
+                    mask1 = cv2.bitwise_not(mask1)
 
-            #     char1_pred = model_license.predict(char1)[0]
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                    sizes = stats[1:, -1]
+                    component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
 
-            #     print(char1_pred)
-            #     char1String = self.onehot_to_string(char1_pred)
+                                        
+                    chars = []
+                    x_vals = []
+                    for i in component_indices:
+                        x, y, w, h = stats[i+1, :4]
+                        char = result[y-5:y+h+5, x-5:x+w+5]
+                        x_vals.append(x)
+                        chars.append(char)
 
-            #     index = np.argmax(char1String)
+                    sorted_x = np.argsort(x_vals)
+                    sorted_chars = [chars[i] for i in sorted_x]
 
-            #     print(index)
-            #     # char2_pred = model_license.predict(char2)
-            #     # char2String = self.onehot_to_string(char2_pred)
-            #     # char3_pred = model_license.predict(char3)
-            #     # char3String = self.onehot_to_string(char3_pred)
-            #     # char4_pred = model_license.predict(char4)
-            #     # char4String = self.onehot_to_string(char4_pred)
+                    char1 = cv2.resize(sorted_chars[0], (30,36))
+                    char2 = cv2.resize(sorted_chars[1], (30,36))
+                    char3 = cv2.resize(sorted_chars[2], (30,36))
+                    char4 = cv2.resize(sorted_chars[3], (30,36))
 
-            #     print(char1String)
+                    char1 = np.expand_dims(char1, axis=0)
+                    char2 = np.expand_dims(char2, axis=0)
+                    char3 = np.expand_dims(char3, axis=0)
+                    char4 = np.expand_dims(char4, axis=0)
 
+                    char1_pred = model_license.predict(char1)
+                    char2_pred = model_license.predict(char2)
+                    char3_pred = model_license.predict(char3)
+                    char4_pred = model_license.predict(char4)
 
+                    index1 = np.argmax(char1_pred)
+                    index2 = np.argmax(char2_pred)
+                    index3 = np.argmax(char3_pred)
+                    index4 = np.argmax(char4_pred)
 
-                
-            #     self.countResult += 1
-                
-                # cv2.imwrite(self.image_filename, cv_image)
-                # cv2.imshow("mask", result)
-                # cv2.waitKey(1)
+                    print("PREDICTED ------------------\n")
+                    print(index1)
+                    print(index2)
+                    print(index3)
+                    print(index4)
 
         except CvBridgeError as e:
             print(e)
@@ -191,8 +217,195 @@ class Controller:
             
             except CvBridgeError as e:
                 print(e)
+
+            if self.start_timer < 18.5:
+                try:
+                    prediction = model.predict(np.array([cv_pred]))
+
+                    max_index = np.argmax(prediction)
+                    if max_index == 0:
+                        # Left
+                        angular_vel = 0.7
+                    elif max_index == 1:
+                        # Straight
+                        angular_vel = 0.0
+                    else:
+                        # Right
+                        angular_vel = -0.6
+
+                    linear_vel = 0.10
+                    print(prediction)
+                    twist = Twist()
+                    twist.linear.x = linear_vel
+                    twist.angular.z = angular_vel
+                    self.cmd_pub.publish(twist) 
+
+                    if int(self.start_timer)==4 and self.countGrassCarOne == 0:
+                        # self.countGrassCarOne += 1
+                        height, width = hsv_image.shape[:2]
+                        crop_image = cv_image[int(height*0.6):height, 0:width]
+                        crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                        hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+                        hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                        #define the lower and upper hsv values for the hsv colors
+                        lower_hsv = np.uint8(np.array([100, 0, 80]))
+                        upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+                        # mask and extract the license plate
+                        mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+                        mask_bin = mask.astype(np.uint8) * 255
+
+                        # Count the number of blue pixels in the ROI
+                        pixel_count = cv2.countNonZero(mask_bin)
+                        if(pixel_count>3000):
+                            _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                            x, y, w, h, _ = stats[largest_label]
+                            result = crop_image[y:y+h, x:x+w]
+
+                            cv2.imshow("license plate", result)
+                            cv2.waitKey(1)
+
+                            _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+
+                            mask1 = cv2.bitwise_not(mask1)
+
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                            sizes = stats[1:, -1]
+                            component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
+
+                                                
+                            chars = []
+                            x_vals = []
+                            for i in component_indices:
+                                x, y, w, h = stats[i+1, :4]
+                                char = result[y-5:y+h+5, x-5:x+w+5]
+                                x_vals.append(x)
+                                chars.append(char)
+
+                            sorted_x = np.argsort(x_vals)
+                            sorted_chars = [chars[i] for i in sorted_x]
+
+                            char1 = cv2.resize(sorted_chars[0], (30,36))
+                            char2 = cv2.resize(sorted_chars[1], (30,36))
+                            char3 = cv2.resize(sorted_chars[2], (30,36))
+                            char4 = cv2.resize(sorted_chars[3], (30,36))
+
+                            char1 = np.expand_dims(char1, axis=0)
+                            char2 = np.expand_dims(char2, axis=0)
+                            char3 = np.expand_dims(char3, axis=0)
+                            char4 = np.expand_dims(char4, axis=0)
+
+                            char1_pred = model_license.predict(char1)
+                            char2_pred = model_license.predict(char2)
+                            char3_pred = model_license.predict(char3)
+                            char4_pred = model_license.predict(char4)
+
+                            index1 = np.argmax(char1_pred)
+                            index2 = np.argmax(char2_pred)
+                            index3 = np.argmax(char3_pred)
+                            index4 = np.argmax(char4_pred)
+
+                            print("PREDICTED ------------------\n")
+                            print(index1)
+                            print(index2)
+                            print(index3)
+                            print(index4)
+                            self.countGrassCarOne += 1
+
+
+                    if int(self.start_timer)==11 and self.countGrassCarTwo == 0:
+                        # self.countGrassCarTwo += 1
+                        height, width = hsv_image.shape[:2]
+                        crop_image = cv_image[int(height*0.6):height, 0:width]
+                        crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                        hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+                        hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                        #define the lower and upper hsv values for the hsv colors
+                        lower_hsv = np.uint8(np.array([100, 0, 80]))
+                        upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+                        # mask and extract the license plate
+                        mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+                        mask_bin = mask.astype(np.uint8) * 255
+
+                        # Count the number of blue pixels in the ROI
+                        pixel_count = cv2.countNonZero(mask_bin)
+                        if(pixel_count>3300):
+                            _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                            x, y, w, h, _ = stats[largest_label]
+                            result = crop_image[y:y+h, x:x+w]
+
+                            cv2.imshow("license plate", result)
+                            cv2.waitKey(1)
+
+                            _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+
+                            mask1 = cv2.bitwise_not(mask1)
+
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                            sizes = stats[1:, -1]
+                            component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
+
+                                                
+                            chars = []
+                            x_vals = []
+                            for i in component_indices:
+                                x, y, w, h = stats[i+1, :4]
+                                char = result[y-5:y+h+5, x-5:x+w+5]
+                                x_vals.append(x)
+                                chars.append(char)
+
+                            sorted_x = np.argsort(x_vals)
+                            sorted_chars = [chars[i] for i in sorted_x]
+
+                            char1 = cv2.resize(sorted_chars[0], (30,36))
+                            char2 = cv2.resize(sorted_chars[1], (30,36))
+                            char3 = cv2.resize(sorted_chars[2], (30,36))
+                            char4 = cv2.resize(sorted_chars[3], (30,36))
+
+                            char1 = np.expand_dims(char1, axis=0)
+                            char2 = np.expand_dims(char2, axis=0)
+                            char3 = np.expand_dims(char3, axis=0)
+                            char4 = np.expand_dims(char4, axis=0)
+
+                            char1_pred = model_license.predict(char1)
+                            char2_pred = model_license.predict(char2)
+                            char3_pred = model_license.predict(char3)
+                            char4_pred = model_license.predict(char4)
+
+                            index1 = np.argmax(char1_pred)
+                            index2 = np.argmax(char2_pred)
+                            index3 = np.argmax(char3_pred)
+                            index4 = np.argmax(char4_pred)
+
+                            print("PREDICTED ------------------\n")
+                            print(index1)
+                            print(index2)
+                            print(index3)
+                            print(index4)
+                            self.countGrassCarTwo += 1
+                    
+                # # Map the predicted class to the corresponding steering angle
+                # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
+                # angular_vel = steering_angles[pred_class]
+                # linear_vel = 0.15
+                except Exception as e:
+                    print("Error predicting: ", str(e))
+
+                # twist = Twist()
+                # twist.linear.x = linear_vel
+                # twist.angular.z = angular_vel
+                # self.cmd_pub.publish(twist)
             # Pass the image through the model and get the predicted class
-            if self.start_timer >= 18.5:
+            elif (self.start_timer >= 18.5 and self.start_timer < 21.5) or self.start_timer >= 23:
                 twist = Twist() 
                 twist.linear.x = 0.24
                 twist.angular.z = self.pid.computeRight(max_col)
@@ -232,48 +445,170 @@ class Controller:
                 edges_red = cv2.Canny(blured_image_red, 100, 200)
 
                 red_line_points = np.count_nonzero(edges_red)
-                
+
+                # self.countGrassCarOne += 1
+                height, width = hsv_image.shape[:2]
+                crop_image = cv_image[int(height*0.6):height, 0:width]
+                crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+                hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                #define the lower and upper hsv values for the hsv colors
+                lower_hsv = np.uint8(np.array([100, 0, 80]))
+                upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+                # mask and extract the license plate
+                mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+                mask_bin = mask.astype(np.uint8) * 255
+
+                # Count the number of blue pixels in the ROI
+                pixel_count = cv2.countNonZero(mask_bin)
+                if(pixel_count>3000):
+                    _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                    x, y, w, h, _ = stats[largest_label]
+                    result = crop_image[y:y+h, x:x+w]
+
+                    cv2.imshow("license plate", result)
+                    cv2.waitKey(1)
+
+                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+
+                    mask1 = cv2.bitwise_not(mask1)
+
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                    sizes = stats[1:, -1]
+                    component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
+
+                                        
+                    chars = []
+                    x_vals = []
+                    for i in component_indices:
+                        x, y, w, h = stats[i+1, :4]
+                        char = result[y-5:y+h+5, x-5:x+w+5]
+                        x_vals.append(x)
+                        chars.append(char)
+
+                    sorted_x = np.argsort(x_vals)
+                    sorted_chars = [chars[i] for i in sorted_x]
+
+                    char1 = cv2.resize(sorted_chars[0], (30,36))
+                    char2 = cv2.resize(sorted_chars[1], (30,36))
+                    char3 = cv2.resize(sorted_chars[2], (30,36))
+                    char4 = cv2.resize(sorted_chars[3], (30,36))
+
+                    char1 = np.expand_dims(char1, axis=0)
+                    char2 = np.expand_dims(char2, axis=0)
+                    char3 = np.expand_dims(char3, axis=0)
+                    char4 = np.expand_dims(char4, axis=0)
+
+                    char1_pred = model_license.predict(char1)
+                    char2_pred = model_license.predict(char2)
+                    char3_pred = model_license.predict(char3)
+                    char4_pred = model_license.predict(char4)
+
+                    index1 = np.argmax(char1_pred)
+                    index2 = np.argmax(char2_pred)
+                    index3 = np.argmax(char3_pred)
+                    index4 = np.argmax(char4_pred)
+
+                    print("PREDICTED ------------------\n")
+                    print(index1)
+                    print(index2)
+                    print(index3)
+                    print(index4)
+
                 if red_line_points > 0:
                     twist = Twist()
                     twist.linear.x = 0
                     twist.angular.z = 0
                     self.cmd_pub.publish(twist)
-                    self.license_pub.publish(String('Vlandy,pass,-1,VLANDFinished')) #End Time
+                    self.license_pub.publish(String('Vlandy,Shrek,-1,VLANDFinished')) #End Time
                     print("The end")
                     time.sleep(20)
             else:
-                try:
-                    prediction = model.predict(np.array([cv_pred]))
+                twist = Twist()
+                twist.linear.x = 0.21
+                if(min_col > 1000):
+                    min_col = 50
+                    self.count_rising_edge += 1
+                twist.angular.z = self.pidLeft.computeLeft(min_col) * 1.4
+                self.cmd_pub.publish(twist)
+                # self.countGrassCarOne += 1
+                height, width = hsv_image.shape[:2]
+                crop_image = cv_image[int(height*0.6):height, 0:width]
+                crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
 
-                    max_index = np.argmax(prediction)
-                    if max_index == 0:
-                        # Left
-                        angular_vel = 0.7
-                    elif max_index == 1:
-                        # Straight
-                        angular_vel = 0.0
-                    else:
-                        # Right
-                        angular_vel = -0.7  
+                hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                #define the lower and upper hsv values for the hsv colors
+                lower_hsv = np.uint8(np.array([100, 0, 80]))
+                upper_hsv = np.uint8(np.array([160, 70, 190]))
 
-                    linear_vel = 0.10
-                    print(prediction)
-                    twist = Twist()
-                    twist.linear.x = linear_vel
-                    twist.angular.z = angular_vel
-                    self.cmd_pub.publish(twist)
-                    
-                # # Map the predicted class to the corresponding steering angle
-                # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
-                # angular_vel = steering_angles[pred_class]
-                # linear_vel = 0.15
-                except Exception as e:
-                    print("Error predicting: ", str(e))
+                # mask and extract the license plate
+                mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
 
-                # twist = Twist()
-                # twist.linear.x = linear_vel
-                # twist.angular.z = angular_vel
-                # self.cmd_pub.publish(twist)
+                mask_bin = mask.astype(np.uint8) * 255
+
+                # Count the number of blue pixels in the ROI
+                pixel_count = cv2.countNonZero(mask_bin)
+                if(pixel_count>3000):
+                    _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                    x, y, w, h, _ = stats[largest_label]
+                    result = crop_image[y:y+h, x:x+w]
+
+                    cv2.imshow("license plate", result)
+                    cv2.waitKey(1)
+
+                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+
+                    mask1 = cv2.bitwise_not(mask1)
+
+                    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                    sizes = stats[1:, -1]
+                    component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
+
+                                        
+                    chars = []
+                    x_vals = []
+                    for i in component_indices:
+                        x, y, w, h = stats[i+1, :4]
+                        char = result[y-5:y+h+5, x-5:x+w+5]
+                        x_vals.append(x)
+                        chars.append(char)
+
+                    sorted_x = np.argsort(x_vals)
+                    sorted_chars = [chars[i] for i in sorted_x]
+
+                    char1 = cv2.resize(sorted_chars[0], (30,36))
+                    char2 = cv2.resize(sorted_chars[1], (30,36))
+                    char3 = cv2.resize(sorted_chars[2], (30,36))
+                    char4 = cv2.resize(sorted_chars[3], (30,36))
+
+                    char1 = np.expand_dims(char1, axis=0)
+                    char2 = np.expand_dims(char2, axis=0)
+                    char3 = np.expand_dims(char3, axis=0)
+                    char4 = np.expand_dims(char4, axis=0)
+
+                    char1_pred = model_license.predict(char1)
+                    char2_pred = model_license.predict(char2)
+                    char3_pred = model_license.predict(char3)
+                    char4_pred = model_license.predict(char4)
+
+                    index1 = np.argmax(char1_pred)
+                    index2 = np.argmax(char2_pred)
+                    index3 = np.argmax(char3_pred)
+                    index4 = np.argmax(char4_pred)
+
+                    print("PREDICTED ------------------\n")
+                    print(index1)
+                    print(index2)
+                    print(index3)
+                    print(index4)
 
         elif self.state_detect_pedestrian == False and self.count_red_lines == 0:
             if self.start_timer < 0.5:
@@ -394,7 +729,7 @@ class Controller:
                     self.state_inner_done = True
 
                 twist = Twist()
-                twist.linear.x = 0.090
+                twist.linear.x = 0.085
                 if(min_col > 1000):
                     min_col = 0
                 twist.angular.z = self.pidLeft.computeLeft(min_col) * 0.95
@@ -408,7 +743,7 @@ class Controller:
                 self.cmd_pub.publish(twist)
                 self.state_detect_pedestrian = True
                 self.count_red_lines += 1
-                time.sleep(1)
+                # time.sleep(1)
 
         elif self.state_detect_pedestrian == True:
             twist = Twist()
@@ -483,7 +818,7 @@ class Controller:
                     self.cmd_pub.publish(twist)
                     self.state_detect_pedestrian = True
                     self.count_red_lines += 1
-                    time.sleep(2)
+                    # time.sleep(2)
                     print("Last Red Line Count")
                     print(self.count_red_lines)
 
@@ -549,7 +884,7 @@ class Controller:
                     twist.linear.x = 0
                     twist.angular.z = 0
                     self.cmd_pub.publish(twist)
-                    time.sleep(2)
+                    # time.sleep(1)
                     self.start_timer = 0
                     print("Terrain Detected Pause")
 
@@ -567,6 +902,68 @@ class Controller:
 
     def clock_callback(self,msg):
         current_time = msg.clock
+
+    def charToStr(charImg):
+        char_dict = {
+            0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H", 8: "I",
+            9: "J", 10: "K", 11: "L", 12: "M", 13: "N", 14: "O", 15: "P", 16: "Q", 17: "R",
+            18: "S", 19: "T", 20: "U", 21: "V", 22: "W", 23: "X", 24: "Y", 25: "Z",
+            26: "0", 27: "1", 28: "2", 29: "3", 30: "4", 31: "5", 32: "6", 33: "7", 34: "8", 35: "9"
+        }
+
+        charImg = cv2.resize(charImg, (30, 36))
+        charImg = np.expand_dims(charImg, axis=0)
+        
+        charPred = model_license.predict(charImg)[0]
+        index = np.argmax(charPred)
+
+        return char_dict[index]
+
+    def plateToStr(self, posCount, plateImg, w, h):
+        #split the plate into characters
+        firstCharImg = plateImg[0:h, 0:int(w*1.0/3)]
+        secondCharImg = plateImg[0:h, int(w*0.9/3): int(w*0.9/2)]
+        thirdCharImg = plateImg[0:h, int(w*1.2/2): int(w*2.3/3)]
+        fourthCharImg= plateImg[0:h, int(w*2.3/3): w]
+        
+        #convert each character image to string
+        firstCharStr = self.charToStr(firstCharImg)
+        secondCharStr = self.charToStr(secondCharImg)
+        thirdCharStr = self.charToStr(thirdCharImg)
+        fourthCharStr = self.charToStr(fourthCharImg)
+
+        return "Position " + posCount + ": " + firstCharStr + secondCharStr + thirdCharStr + fourthCharStr
+
+
+    def processFrame(self, frame):
+        height, width = frame.shape[:2]
+
+        cropImage = frame[int(height*0.6):height, 0:width]
+        hsvCropImage = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        
+        hsvCropImage = cv2.bilateralFilter(hsvCropImage,10,100,100)
+
+        # mask and extract the license plate
+        mask = cv2.inRange(hsvCropImage, LOWER_HSV, UPPER_HSV)
+
+        maskBin = mask.astype(np.uint8) * 255
+
+        # Count the number of blue pixels in the ROI
+        pixelCount = cv2.countNonZero(maskBin)
+
+        return mask, cropImage, pixelCount
+    
+    def plateDetection(self, frame):
+        mask, cropImage, pixelCount = self.processFrame(self, frame)
+        if(pixelCount>3300):
+                _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                numLabels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                largestLabel = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                x, y, w, h, _ = stats[largestLabel]
+                result = cropImage[y:y+h, x:x+w]
+                self.license_pub.publish(String(self.plateToStr(result)))
+
+
 
     def region(self,image):
         height, width = image.shape
@@ -637,7 +1034,7 @@ class Controller:
         print(angular_z)
         return angular_z
     
-    def onehot_to_string(onehot):
+    def onehot_to_string(index):
         # Define a dictionary mapping indices to characters
         char_dict = {
             0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H", 8: "I",
@@ -647,8 +1044,6 @@ class Controller:
         }
 
         # Find the index of the maximum value in the one-hot vector
-        index = np.argmax(onehot)
-
         # Return the corresponding character from the dictionary
         return char_dict[index]
         
