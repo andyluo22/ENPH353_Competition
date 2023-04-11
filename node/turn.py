@@ -76,6 +76,8 @@ class Controller:
         self.count_red_lines = 0
         self.pedestrian_detected_timer = 0
 
+        # License Plate Counts 
+
         self.grass_terrain_detected = False
 
         # Store times when we stop to detect cars
@@ -124,7 +126,7 @@ class Controller:
 
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
-                if(pixel_count>3300):
+                if(pixel_count>3000):
                     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
@@ -134,7 +136,7 @@ class Controller:
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
 
-                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 75, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -159,6 +161,16 @@ class Controller:
                     char3 = cv2.resize(sorted_chars[2], (30,36))
                     char4 = cv2.resize(sorted_chars[3], (30,36))
 
+                    # cv2.imshow("char1",char1)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char2",char2)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char3",char3)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char4",char4)
+                    # cv2.waitKey(1)
+
+
                     char1 = np.expand_dims(char1, axis=0)
                     char2 = np.expand_dims(char2, axis=0)
                     char3 = np.expand_dims(char3, axis=0)
@@ -174,11 +186,18 @@ class Controller:
                     index3 = np.argmax(char3_pred)
                     index4 = np.argmax(char4_pred)
 
+                    string1 = self.onehot_to_string(index1)
+                    string2 = self.onehot_to_string(index2)
+                    string3 = self.onehot_to_string(index3)
+                    string4 = self.onehot_to_string(index4)
+
                     print("PREDICTED ------------------\n")
-                    print(index1)
-                    print(index2)
-                    print(index3)
-                    print(index4)
+                    print(string1 + string2 + string3 + string4)
+                    # print("PREDICTED ------------------\n")
+                    # print(index1)
+                    # print(index2)
+                    # print(index3)
+                    # print(index4)
 
         except CvBridgeError as e:
             print(e)
@@ -269,7 +288,7 @@ class Controller:
                             cv2.imshow("license plate", result)
                             cv2.waitKey(1)
 
-                            _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+                            _, mask1 = cv2.threshold(result, 75, 255, cv2.THRESH_BINARY)
 
                             mask1 = cv2.bitwise_not(mask1)
 
@@ -294,6 +313,16 @@ class Controller:
                             char3 = cv2.resize(sorted_chars[2], (30,36))
                             char4 = cv2.resize(sorted_chars[3], (30,36))
 
+                            # cv2.imshow("char1",char1)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char2",char2)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char3",char3)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char4",char4)
+                            # cv2.waitKey(1)
+
+
                             char1 = np.expand_dims(char1, axis=0)
                             char2 = np.expand_dims(char2, axis=0)
                             char3 = np.expand_dims(char3, axis=0)
@@ -309,13 +338,13 @@ class Controller:
                             index3 = np.argmax(char3_pred)
                             index4 = np.argmax(char4_pred)
 
-                            print("PREDICTED ------------------\n")
-                            print(index1)
-                            print(index2)
-                            print(index3)
-                            print(index4)
-                            self.countGrassCarOne += 1
+                            string1 = self.onehot_to_string(index1)
+                            string2 = self.onehot_to_string(index2)
+                            string3 = self.onehot_to_string(index3)
+                            string4 = self.onehot_to_string(index4)
 
+                            print("PREDICTED ------------------\n")
+                            print(string1 + string2 + string3 + string4)
 
                     if int(self.start_timer)==11 and self.countGrassCarTwo == 0:
                         # self.countGrassCarTwo += 1
@@ -346,7 +375,7 @@ class Controller:
                             cv2.imshow("license plate", result)
                             cv2.waitKey(1)
 
-                            _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+                            _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
 
                             mask1 = cv2.bitwise_not(mask1)
 
@@ -371,6 +400,15 @@ class Controller:
                             char3 = cv2.resize(sorted_chars[2], (30,36))
                             char4 = cv2.resize(sorted_chars[3], (30,36))
 
+                            # cv2.imshow("char1",char1)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char2",char2)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char3",char3)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char4",char4)
+                            # cv2.waitKey(1)
+
                             char1 = np.expand_dims(char1, axis=0)
                             char2 = np.expand_dims(char2, axis=0)
                             char3 = np.expand_dims(char3, axis=0)
@@ -386,11 +424,18 @@ class Controller:
                             index3 = np.argmax(char3_pred)
                             index4 = np.argmax(char4_pred)
 
+                            string1 = self.onehot_to_string(index1)
+                            string2 = self.onehot_to_string(index2)
+                            string3 = self.onehot_to_string(index3)
+                            string4 = self.onehot_to_string(index4)
+
                             print("PREDICTED ------------------\n")
-                            print(index1)
-                            print(index2)
-                            print(index3)
-                            print(index4)
+                            print(string1 + string2 + string3 + string4)
+                            # print("PREDICTED ------------------\n")
+                            # print(index1)
+                            # print(index2)
+                            # print(index3)
+                            # print(index4)
                             self.countGrassCarTwo += 1
                     
                 # # Map the predicted class to the corresponding steering angle
@@ -474,7 +519,7 @@ class Controller:
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
 
-                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -499,6 +544,15 @@ class Controller:
                     char3 = cv2.resize(sorted_chars[2], (30,36))
                     char4 = cv2.resize(sorted_chars[3], (30,36))
 
+                    # cv2.imshow("char1",char1)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char2",char2)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char3",char3)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char4",char4)
+                    # cv2.waitKey(1)
+
                     char1 = np.expand_dims(char1, axis=0)
                     char2 = np.expand_dims(char2, axis=0)
                     char3 = np.expand_dims(char3, axis=0)
@@ -514,11 +568,18 @@ class Controller:
                     index3 = np.argmax(char3_pred)
                     index4 = np.argmax(char4_pred)
 
+                    string1 = self.onehot_to_string(index1)
+                    string2 = self.onehot_to_string(index2)
+                    string3 = self.onehot_to_string(index3)
+                    string4 = self.onehot_to_string(index4)
+
                     print("PREDICTED ------------------\n")
-                    print(index1)
-                    print(index2)
-                    print(index3)
-                    print(index4)
+                    print(string1 + string2 + string3 + string4)
+                    # print("PREDICTED ------------------\n")
+                    # print(index1)
+                    # print(index2)
+                    # print(index3)
+                    # print(index4)
 
                 if red_line_points > 0:
                     twist = Twist()
@@ -564,7 +625,7 @@ class Controller:
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
 
-                    _, mask1 = cv2.threshold(result, 50, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -589,6 +650,15 @@ class Controller:
                     char3 = cv2.resize(sorted_chars[2], (30,36))
                     char4 = cv2.resize(sorted_chars[3], (30,36))
 
+                    # cv2.imshow("char1",char1)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char2",char2)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char3",char3)
+                    # cv2.waitKey(1)
+                    # cv2.imshow("char4",char4)
+                    # cv2.waitKey(1)
+
                     char1 = np.expand_dims(char1, axis=0)
                     char2 = np.expand_dims(char2, axis=0)
                     char3 = np.expand_dims(char3, axis=0)
@@ -604,11 +674,18 @@ class Controller:
                     index3 = np.argmax(char3_pred)
                     index4 = np.argmax(char4_pred)
 
+                    string1 = self.onehot_to_string(index1)
+                    string2 = self.onehot_to_string(index2)
+                    string3 = self.onehot_to_string(index3)
+                    string4 = self.onehot_to_string(index4)
+
                     print("PREDICTED ------------------\n")
-                    print(index1)
-                    print(index2)
-                    print(index3)
-                    print(index4)
+                    print(string1 + string2 + string3 + string4)
+                    # print("PREDICTED ------------------\n")
+                    # print(index1)
+                    # print(index2)
+                    # print(index3)
+                    # print(index4)
 
         elif self.state_detect_pedestrian == False and self.count_red_lines == 0:
             if self.start_timer < 0.5:
@@ -1034,7 +1111,7 @@ class Controller:
         print(angular_z)
         return angular_z
     
-    def onehot_to_string(index):
+    def onehot_to_string(self,index):
         # Define a dictionary mapping indices to characters
         char_dict = {
             0: "A", 1: "B", 2: "C", 3: "D", 4: "E", 5: "F", 6: "G", 7: "H", 8: "I",
