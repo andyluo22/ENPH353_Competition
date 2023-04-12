@@ -91,6 +91,7 @@ class Controller:
         self.countGrassCarTwo = 0
         self.grassCarOneTimer = 0
         self.grassCarTwoTimer = 0
+        self.countGrassCarThree = 0
 
         self.moving_car_detected = False
         self.car_frame_counter = 0
@@ -148,7 +149,7 @@ class Controller:
                         result =  np.clip(result, 0, 255).astype(np.uint8)
                     elif self.count_license_plates ==0:
                         current_mean = np.mean(result)
-                        alpha = 1.7
+                        alpha = 1.8
                         beta = 90 - current_mean
                         result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
                         # Clip the resulting image to ensure valid pixel values
@@ -296,7 +297,7 @@ class Controller:
                     twist.angular.z = angular_vel
                     self.cmd_pub.publish(twist) 
 
-                    if int(self.start_timer)==4 and self.countGrassCarOne == 0:
+                    if int(self.start_timer)==3 and self.countGrassCarOne == 0:
                         # self.countGrassCarOne += 1
                         height, width = hsv_image.shape[:2]
                         crop_image = cv_image[int(height*0.6):height, 0:width]
@@ -315,7 +316,7 @@ class Controller:
 
                         # Count the number of blue pixels in the ROI
                         pixel_count = cv2.countNonZero(mask_bin)
-                        if(pixel_count>50 and time.time() - self.time_of_last_license_plate > 3):
+                        if(pixel_count>2500 and time.time() - self.time_of_last_license_plate > 3):
                             self.time_of_last_license_plate = time.time()
                             _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
@@ -400,7 +401,7 @@ class Controller:
                             print("PREDICTED ------------------\n")
                             print(string1 + string2 + string3 + string4)
 
-                    if int(self.start_timer)==11 and self.countGrassCarTwo == 0:
+                    elif int(self.start_timer)==11 and self.countGrassCarTwo == 0:
                         # self.countGrassCarTwo += 1
                         height, width = hsv_image.shape[:2]
                         crop_image = cv_image[int(height*0.6):height, 0:width]
@@ -509,6 +510,116 @@ class Controller:
                             # print(index3)
                             # print(index4)
                             self.countGrassCarTwo += 1
+
+                    elif int(self.start_timer)==16 and self.countGrassCarThree == 0:
+                        # self.countGrassCarTwo += 1
+                        height, width = hsv_image.shape[:2]
+                        crop_image = cv_image[int(height*0.6):height, 0:width]
+                        crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
+                        hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+
+                        hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
+                        #define the lower and upper hsv values for the hsv colors
+                        lower_hsv = np.uint8(np.array([100, 0, 80]))
+                        upper_hsv = np.uint8(np.array([160, 70, 190]))
+
+                        # mask and extract the license plate
+                        mask = cv2.inRange(hsv_crop_image, lower_hsv, upper_hsv)
+
+                        mask_bin = mask.astype(np.uint8) * 255
+
+                        # Count the number of blue pixels in the ROI
+                        pixel_count = cv2.countNonZero(mask_bin)
+                        if(pixel_count>2700 and time.time() - self.time_of_last_license_plate > 3):
+                            self.time_of_last_license_plate = time.time()
+                            _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
+                            largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+                            x, y, w, h, _ = stats[largest_label]
+                            result = crop_image[y:y+h, x:x+w]
+
+                            current_mean = np.mean(result)
+                            alpha = 1.0
+                            beta = 110.0 - current_mean
+
+
+                            result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+
+                            # Clip the resulting image to ensure valid pixel values
+                            result =  np.clip(result, 0, 255).astype(np.uint8)
+
+                            cv2.imshow("license plate", result)
+                            cv2.waitKey(1)
+
+                            self.count_license_plates += 1
+
+                            _, mask1 = cv2.threshold(result, 80, 255, cv2.THRESH_BINARY)
+
+                            mask1 = cv2.bitwise_not(mask1)
+
+                            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask1)
+                            sizes = stats[1:, -1]
+                            component_indices = np.argsort(sizes)[::-1][:4] # select top four largest components
+
+                                                
+                            chars = []
+                            x_vals = []
+                            for i in component_indices:
+                                x, y, w, h = stats[i+1, :4]
+                                char = result[y-5:y+h+5, x-5:x+w+5]
+                                x_vals.append(x)
+                                chars.append(char)
+
+                            sorted_x = np.argsort(x_vals)
+                            sorted_chars = [chars[i] for i in sorted_x]
+
+                            char1 = cv2.resize(sorted_chars[0], (30,36))
+                            char2 = cv2.resize(sorted_chars[1], (30,36))
+                            char3 = cv2.resize(sorted_chars[2], (30,36))
+                            char4 = cv2.resize(sorted_chars[3], (30,36))
+
+                            # cv2.imshow("char1",char1)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char2",char2)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char3",char3)
+                            # cv2.waitKey(1)
+                            # cv2.imshow("char4",char4)
+                            # cv2.waitKey(1)
+
+                            char1 = np.expand_dims(char1, axis=0)
+                            char2 = np.expand_dims(char2, axis=0)
+                            char3 = np.expand_dims(char3, axis=0)
+                            char4 = np.expand_dims(char4, axis=0)
+
+                            char1_pred = model_license.predict(char1)
+                            char2_pred = model_license.predict(char2)
+                            char3_pred = model_license.predict(char3)
+                            char4_pred = model_license.predict(char4)
+
+                            index1 = np.argmax(char1_pred)
+                            index2 = np.argmax(char2_pred)
+                            index3 = np.argmax(char3_pred)
+                            index4 = np.argmax(char4_pred)
+
+                            string1 = self.onehot_to_string(index1)
+                            string2 = self.onehot_to_string(index2)
+                            string3 = self.onehot_to_string(index3)
+                            string4 = self.onehot_to_string(index4)
+
+                            plate = string1 + string2 + string3 + string4
+
+                            message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                            self.license_pub.publish(message)
+
+                            print("PREDICTED ------------------\n")
+                            print(string1 + string2 + string3 + string4)
+                            # print("PREDICTED ------------------\n")
+                            # print(index1)
+                            # print(index2)
+                            # print(index3)
+                            # print(index4)
+                            self.countGrassCarThree+= 1
                     
                 # # Map the predicted class to the corresponding steering angle
                 # steering_angles = {'L': 0.86, 'S': 0.0, 'R': -0.86}
@@ -522,7 +633,7 @@ class Controller:
                 # twist.angular.z = angular_vel
                 # self.cmd_pub.publish(twist)
             # Pass the image through the model and get the predicted class
-            elif (self.start_timer >= 18.5 and self.start_timer < 21.5) or self.start_timer >= 23:
+            elif (self.start_timer >= 19 and self.start_timer < 21.5) or self.start_timer >= 23:
                 twist = Twist() 
                 twist.linear.x = 0.22
                 twist.angular.z = self.pid.computeRight(max_col)
@@ -565,9 +676,9 @@ class Controller:
 
                 # self.countGrassCarOne += 1
                 height, width = hsv_image.shape[:2]
-                crop_image = cv_image[int(height*0.6):height, 0:width]
+                crop_image = cv_image[int(height*0.3):height, 0:width]
                 crop_image = cv2.cvtColor(crop_image,cv2.COLOR_BGR2GRAY)
-                hsv_crop_image = hsv_image[int(height*0.6):height, 0:width]
+                hsv_crop_image = hsv_image[int(height*0.3):height, 0:width]
 
                 hsv_crop_image = cv2.bilateralFilter(hsv_crop_image,10,100,100)
                 #define the lower and upper hsv values for the hsv colors
@@ -582,7 +693,7 @@ class Controller:
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
                 if self.count_license_plates == 5:
-                    pixel_min =50
+                    pixel_min =2800
                 else:
                     pixel_min =2800
                 if(pixel_count> pixel_min and time.time() - self.time_of_last_license_plate > 0.75):
