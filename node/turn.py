@@ -25,7 +25,7 @@ LEFT_MOST_X_COORDINATE = 60
 LOWER_HSV = np.uint8(np.array([100, 0, 80]))
 UPPER_HSV = np.uint8(np.array([160, 70, 190]))
 
-CAR_ORDER = ["P7","P8","P3","P4","P5","P6","P1","P2"]
+CAR_ORDER = [7,8,3,4,5,6,1,2]
 
 model_path = '/home/fizzer/ros_ws/src/controller_pkg/node/modelAction12.h5'
 model = tf.keras.models.load_model(model_path)
@@ -34,12 +34,17 @@ model = tf.keras.models.load_model(model_path)
 # model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModel.h5'
 # model_license = tf.keras.models.load_model(model_license_path)
 
-# New Font GOOOd 
+# New Font First GOOOd 
 # model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModelNewFontWhoDisUptrain.h5'
 # model_license = tf.keras.models.load_model(model_license_path)
 
+#
 model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/VladasHotLittleModelNewFontWhoDisUptrainTimesTwo.h5'
 model_license = tf.keras.models.load_model(model_license_path)
+
+# # New Font Third 
+# model_license_path = '/home/fizzer/ros_ws/src/controller_pkg/node/SheIsTiredOfTraining.h5'
+# model_license = tf.keras.models.load_model(model_license_path)
 
 
 class Controller:
@@ -66,6 +71,7 @@ class Controller:
         self.frame_counter = 0  # to count the frames
         self.speed_up = False
         self.start_speedup_timer = 0
+        self.time_of_last_license_plate = 0
 
         self.off_terrain = False
         self.min_col_detected = False
@@ -126,17 +132,41 @@ class Controller:
 
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
-                if(pixel_count>3000):
+                if(pixel_count>2800 and time.time() - self.time_of_last_license_plate > 3):
+                    self.time_of_last_license_plate = time.time()
                     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                     x, y, w, h, _ = stats[largest_label]
                     result = crop_image[y:y+h, x:x+w]
+                    if self.count_license_plates==1:
+                        current_mean = np.mean(result)
+                        alpha = 1.0
+                        beta = 140 - current_mean
+                        result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+                        # Clip the resulting image to ensure valid pixel values
+                        result =  np.clip(result, 0, 255).astype(np.uint8)
+                    elif self.count_license_plates ==0:
+                        current_mean = np.mean(result)
+                        alpha = 1.7
+                        beta = 90 - current_mean
+                        result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+                        # Clip the resulting image to ensure valid pixel values
+                        result =  np.clip(result, 0, 255).astype(np.uint8)
+                    else:
+                        current_mean = np.mean(result)
+                        alpha = 1.7
+                        beta = 100 - current_mean
+                        result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+                        # Clip the resulting image to ensure valid pixel values
+                        result =  np.clip(result, 0, 255).astype(np.uint8)
+
 
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
+                    self.count_license_plates += 1
 
-                    _, mask1 = cv2.threshold(result, 75, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 85, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -190,6 +220,13 @@ class Controller:
                     string2 = self.onehot_to_string(index2)
                     string3 = self.onehot_to_string(index3)
                     string4 = self.onehot_to_string(index4)
+                    
+                    plate = string1 + string2 + string3 + string4
+
+                    message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                    self.license_pub.publish(message)
+                    
+
 
                     print("PREDICTED ------------------\n")
                     print(string1 + string2 + string3 + string4)
@@ -278,17 +315,29 @@ class Controller:
 
                         # Count the number of blue pixels in the ROI
                         pixel_count = cv2.countNonZero(mask_bin)
-                        if(pixel_count>3000):
+                        if(pixel_count>50 and time.time() - self.time_of_last_license_plate > 3):
+                            self.time_of_last_license_plate = time.time()
                             _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                             largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                             x, y, w, h, _ = stats[largest_label]
                             result = crop_image[y:y+h, x:x+w]
 
+                            current_mean = np.mean(result)
+                            alpha = 1.0
+                            beta = 120.0 - current_mean
+
+
+                            result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+
+                            # Clip the resulting image to ensure valid pixel values
+                            result =  np.clip(result, 0, 255).astype(np.uint8)
+
                             cv2.imshow("license plate", result)
                             cv2.waitKey(1)
+                            self.count_license_plates += 1
 
-                            _, mask1 = cv2.threshold(result, 75, 255, cv2.THRESH_BINARY)
+                            _, mask1 = cv2.threshold(result, 80, 255, cv2.THRESH_BINARY)
 
                             mask1 = cv2.bitwise_not(mask1)
 
@@ -342,6 +391,11 @@ class Controller:
                             string2 = self.onehot_to_string(index2)
                             string3 = self.onehot_to_string(index3)
                             string4 = self.onehot_to_string(index4)
+
+                            plate = string1 + string2 + string3 + string4
+
+                            message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                            self.license_pub.publish(message)
 
                             print("PREDICTED ------------------\n")
                             print(string1 + string2 + string3 + string4)
@@ -365,17 +419,30 @@ class Controller:
 
                         # Count the number of blue pixels in the ROI
                         pixel_count = cv2.countNonZero(mask_bin)
-                        if(pixel_count>3300):
+                        if(pixel_count>2900 and time.time() - self.time_of_last_license_plate > 3):
+                            self.time_of_last_license_plate = time.time()
                             _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                             largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                             x, y, w, h, _ = stats[largest_label]
                             result = crop_image[y:y+h, x:x+w]
 
+                            current_mean = np.mean(result)
+                            alpha = 1.0
+                            beta = 120.0 - current_mean
+
+
+                            result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+
+                            # Clip the resulting image to ensure valid pixel values
+                            result =  np.clip(result, 0, 255).astype(np.uint8)
+
                             cv2.imshow("license plate", result)
                             cv2.waitKey(1)
 
-                            _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
+                            self.count_license_plates += 1
+
+                            _, mask1 = cv2.threshold(result, 80, 255, cv2.THRESH_BINARY)
 
                             mask1 = cv2.bitwise_not(mask1)
 
@@ -428,6 +495,11 @@ class Controller:
                             string2 = self.onehot_to_string(index2)
                             string3 = self.onehot_to_string(index3)
                             string4 = self.onehot_to_string(index4)
+
+                            plate = string1 + string2 + string3 + string4
+
+                            message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                            self.license_pub.publish(message)
 
                             print("PREDICTED ------------------\n")
                             print(string1 + string2 + string3 + string4)
@@ -452,7 +524,7 @@ class Controller:
             # Pass the image through the model and get the predicted class
             elif (self.start_timer >= 18.5 and self.start_timer < 21.5) or self.start_timer >= 23:
                 twist = Twist() 
-                twist.linear.x = 0.24
+                twist.linear.x = 0.22
                 twist.angular.z = self.pid.computeRight(max_col)
                 self.cmd_pub.publish(twist)
                 print("about to finish outerloop")
@@ -509,17 +581,42 @@ class Controller:
 
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
-                if(pixel_count>3000):
+                if self.count_license_plates == 5:
+                    pixel_min =50
+                else:
+                    pixel_min =2800
+                if(pixel_count> pixel_min and time.time() - self.time_of_last_license_plate > 0.75):
+                    self.time_of_last_license_plate = time.time()
                     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                     x, y, w, h, _ = stats[largest_label]
                     result = crop_image[y:y+h, x:x+w]
 
+                    if self.count_license_plates == 5:
+                        current_mean = np.mean(result)
+                        alpha = 1.7
+                        beta = 80.0 - current_mean
+
+
+                        result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+
+                        # Clip the resulting image to ensure valid pixel values
+                        result =  np.clip(result, 0, 255).astype(np.uint8)
+                    else:
+                        current_mean = np.mean(result)
+                        alpha = 1.7
+                        beta = 80 - current_mean
+                        result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+                        # Clip the resulting image to ensure valid pixel values
+                        result =  np.clip(result, 0, 255).astype(np.uint8)
+
+
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
+                    self.count_license_plates += 1
 
-                    _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 80, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -572,6 +669,12 @@ class Controller:
                     string2 = self.onehot_to_string(index2)
                     string3 = self.onehot_to_string(index3)
                     string4 = self.onehot_to_string(index4)
+
+                    plate = string1 + string2 + string3 + string4
+
+                    message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                    self.license_pub.publish(message)
+                    
 
                     print("PREDICTED ------------------\n")
                     print(string1 + string2 + string3 + string4)
@@ -615,17 +718,29 @@ class Controller:
 
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
-                if(pixel_count>3000):
+                if(pixel_count>2900 and time.time() - self.time_of_last_license_plate > 3):
+                    self.time_of_last_license_plate = time.time()
                     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
                     largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
                     x, y, w, h, _ = stats[largest_label]
                     result = crop_image[y:y+h, x:x+w]
 
+                    current_mean = np.mean(result)
+                    alpha = 2.0
+                    beta = 80 - current_mean
+
+
+                    result = cv2.addWeighted(result, alpha, np.zeros(result.shape, result.dtype), 0, beta)
+
+                    # Clip the resulting image to ensure valid pixel values
+                    result =  np.clip(result, 0, 255).astype(np.uint8)
+
                     cv2.imshow("license plate", result)
                     cv2.waitKey(1)
+                    self.count_license_plates += 1
 
-                    _, mask1 = cv2.threshold(result, 70, 255, cv2.THRESH_BINARY)
+                    _, mask1 = cv2.threshold(result, 80, 255, cv2.THRESH_BINARY)
 
                     mask1 = cv2.bitwise_not(mask1)
 
@@ -678,6 +793,11 @@ class Controller:
                     string2 = self.onehot_to_string(index2)
                     string3 = self.onehot_to_string(index3)
                     string4 = self.onehot_to_string(index4)
+
+                    plate = string1 + string2 + string3 + string4
+
+                    message = "TeamRed,multi21,{},{}".format(CAR_ORDER[self.count_license_plates-1], plate)
+                    self.license_pub.publish(message)
 
                     print("PREDICTED ------------------\n")
                     print(string1 + string2 + string3 + string4)
@@ -847,7 +967,7 @@ class Controller:
 
         else:
             twist = Twist() 
-            twist.linear.x = 0.27
+            twist.linear.x = 0.20
             twist.angular.z = self.pid.computeRight(max_col)
             self.cmd_pub.publish(twist)
 
