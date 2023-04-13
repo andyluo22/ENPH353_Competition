@@ -530,7 +530,7 @@ class Controller:
 
                         # Count the number of blue pixels in the ROI
                         pixel_count = cv2.countNonZero(mask_bin)
-                        if(pixel_count>2700 and time.time() - self.time_of_last_license_plate > 3):
+                        if(pixel_count>2500 and time.time() - self.time_of_last_license_plate > 3):
                             self.time_of_last_license_plate = time.time()
                             _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
@@ -633,7 +633,7 @@ class Controller:
                 # twist.angular.z = angular_vel
                 # self.cmd_pub.publish(twist)
             # Pass the image through the model and get the predicted class
-            elif (self.start_timer >= 19 and self.start_timer < 21.5) or self.start_timer >= 23:
+            elif (self.start_timer >= 18.4 and self.start_timer < 21.5) or self.start_timer >= 23:
                 twist = Twist() 
                 twist.linear.x = 0.22
                 twist.angular.z = self.pid.computeRight(max_col)
@@ -643,6 +643,9 @@ class Controller:
                 img_red = cv_image[700:720, 900: 1100]
                 # Convert the image to HSV color space
                 hsv_img_red = cv2.cvtColor(img_red, cv2.COLOR_BGR2HSV)
+
+                if self.start_timer >= 20 and self.count_license_plates == 5:
+                    self.count_license_plates += 1
 
                 # Define the range of red color in HSV color space
                 lower_red = np.array([0, 50, 50])
@@ -693,7 +696,7 @@ class Controller:
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
                 if self.count_license_plates == 5:
-                    pixel_min =2800
+                    pixel_min =2200
                 else:
                     pixel_min =2800
                 if(pixel_count> pixel_min and time.time() - self.time_of_last_license_plate > 0.75):
@@ -802,7 +805,10 @@ class Controller:
                     self.cmd_pub.publish(twist)
                     self.license_pub.publish(String('Vlandy,Shrek,-1,VLANDFinished')) #End Time
                     print("The end")
-                    time.sleep(20)
+                    twist.linear.x = 0
+                    twist.angular.z = 0
+                    self.cmd_pub.publish(twist)
+                    time.sleep(30)
             else:
                 twist = Twist()
                 twist.linear.x = 0.21
@@ -829,7 +835,7 @@ class Controller:
 
                 # Count the number of blue pixels in the ROI
                 pixel_count = cv2.countNonZero(mask_bin)
-                if(pixel_count>2900 and time.time() - self.time_of_last_license_plate > 3):
+                if(pixel_count>2700 and time.time() - self.time_of_last_license_plate > 3):
                     self.time_of_last_license_plate = time.time()
                     _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                     num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
