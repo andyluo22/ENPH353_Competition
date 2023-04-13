@@ -530,7 +530,7 @@ class Controller:
 
                         # Count the number of blue pixels in the ROI
                         pixel_count = cv2.countNonZero(mask_bin)
-                        if(pixel_count>2500 and time.time() - self.time_of_last_license_plate > 3):
+                        if(pixel_count>2300 and time.time() - self.time_of_last_license_plate > 3):
                             self.time_of_last_license_plate = time.time()
                             _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
                             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(thresh)
