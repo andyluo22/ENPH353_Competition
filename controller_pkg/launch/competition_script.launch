@@ -1,0 +1,8 @@
+<launch>
+    <!-- Controller Launch File-->
+    <node pkg ="controller_pkg"
+        type ="competition_script.py"
+        name = "competition_script"
+        output = "screen">
+    </node>
+</launch>
