@@ -7,4 +7,8 @@ Here are also our** scripts** for training the driving and plate models:
 **Andy's imitation learning model training**:  https://colab.research.google.com/drive/1AJM1DSWOHrhltoMceyutE-tipVh0EBk9#scrollTo=8wtfK3eligIV
 (shared with Miti)
 
+Andy's LogBook: https://docs.google.com/document/d/1ivLyx2RMODlrPHnZI4d9gsgAtxJfpC02CXeX_Nn4Wew/edit
+(Shared with miti)
+
+
 **Vlada's License plate model training**: 
