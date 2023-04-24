@@ -11,4 +11,4 @@ Andy's LogBook: https://docs.google.com/document/d/1ivLyx2RMODlrPHnZI4d9gsgAtxJf
 (Shared with miti)
 
 
-**Vlada's License plate model training**: 
+**Vlada's License plate model training**: https://colab.research.google.com/drive/1fDc6ASaOmkUyqJ8o-IvBeogIW09117B5?usp=sharing 
