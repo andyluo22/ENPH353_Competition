@@ -24,6 +24,8 @@ class CommandLogger:
     def save_image(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            cv_image = cv_image[400:720, 640:1280]
+
         except Exception as e:
             rospy.logerr(e)
             return
@@ -34,11 +36,20 @@ class CommandLogger:
     def log_command(self, msg):
         if self.image_filename is None:
             return
-        linear_x = round(msg.linear.x, 2)
+        linear_x = 0
+            
         angular_z = round(msg.angular.z, 2)
-        self.writer.writerow([linear_x, angular_z, self.image_filename])
+        if(angular_z < 0):
+            action = 'R'
+        elif angular_z > 0:
+            action = 'L'
+        else:
+            action = 'S'
+        self.writer.writerow([linear_x, action, self.image_filename])
         self.file.flush()
         self.image_filename = None
+
+        
 
 if __name__ == '__main__':
     rospy.init_node('command_logger')

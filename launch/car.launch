@@ -1,8 +1,0 @@
-<launch>
-    <!-- Controller Launch File-->
-    <node pkg ="controller_pkg"
-        type ="car.py"
-        name = "car"
-        output = "screen">
-    </node>
-</launch>

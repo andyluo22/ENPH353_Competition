@@ -1,8 +1,0 @@
-<launch>
-    <!-- Controller Launch File-->
-    <node pkg ="controller_pkg"
-        type ="pedestrian.py"
-        name = "pedestrian"
-        output = "screen">
-    </node>
-</launch>
