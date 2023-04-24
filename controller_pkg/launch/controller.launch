@@ -1,8 +1,0 @@
-<launch>
-    <!-- Controller Launch File-->
-    <node pkg ="controller_pkg"
-        type ="controller.py"
-        name = "controller"
-        output = "screen">
-    </node>
-</launch>
